@@ -54,8 +54,8 @@ my $file_circos_cc       = $workingdir."/".$projectid."_c_cc.txt";
 #my $drawgenemap = $Bin."/GeneMap-1.1.1/bin/drawgenemap";
 #my $cmd = $drawgenemap." --force_circular --infile $file_gb --outfile=$file_image1 --density=300";
 #print STDERR $cmd, "\n\n"; `$cmd`;
-#my $python = "python";
-my $python = "/biodata4/home/cliu/cpgview/bin/python";
+my $python = "python";
+
 #Location of Python，The user needs to change the path to the location of Python in the user's local computer.
 
 ####if the input is an accession number from GenBank
@@ -131,7 +131,7 @@ while (! -e $file_circos_trf || ! -e $file_circos_misa || ! -e $file_circos_vmat
 
 ###start to run circos
 print STDERR "\n\nwaited for $count second\n\n";
-my $circos = "$Bin/circos-0.69-6/bin/circos";
+my $circos = "circos";
 #my $circos = "/share/apps/circos-0.69-6/bin/circos";
 $cmd = "(cd $workingdir && $circos -conf $projectid.conf && cp circos.png $file_image2)";
 #my $cmd = "(cd $workingdir && $circos -conf $projectid.conf && cp circos.png $file_image2)";

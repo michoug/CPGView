@@ -12,16 +12,16 @@ from PIL import Image
 def circle(ImageFile):
     
  ima = Image.open(ImageFile).convert("RGBA")
- #ima = ima.resize((500,500),Image.ANTIALIAS)
- ima = ima.resize((3428,3428),Image.ANTIALIAS)
+ #ima = ima.resize((500,500),Image.LANCZOS)
+ ima = ima.resize((3428,3428),Image.LANCZOS)
  
- # ima = ima.resize((600, 600), Image.ANTIALIAS) 
+ # ima = ima.resize((600, 600), Image.LANCZOS) 
  size = ima.size 
  #print(size) 
   
  r2 = min(size[0], size[1])
  if size[0] != size[1]: 
-  ima = ima.resize((r2, r2), Image.ANTIALIAS)
+  ima = ima.resize((r2, r2), Image.LANCZOS)
   #ima.show()
   
  r3 = 800

@@ -1,24 +1,24 @@
-import sys, fitz, os, datetime
+import sys, pymupdf, os, datetime
 
 def pyMuPDF_fitz(pdfPath, imagePath):
     startTime_pdf2img = datetime.datetime.now()#开始时间
 
     print("imagePath="+imagePath)
-    pdfDoc = fitz.open(pdfPath)
-    for pg in range(pdfDoc.pageCount):
+    pdfDoc = pymupdf.open(pdfPath)
+    for pg in range(pdfDoc.page_count):
         page   = pdfDoc[pg]
         rotate = int(0)
         
         
         zoom_x = 2 #(1.33333333-->1056x816)   (2-->1584x1224)
         zoom_y = 2
-        mat    = fitz.Matrix(zoom_x, zoom_y).preRotate(rotate)
-        pix    = page.getPixmap(matrix=mat, alpha=False)
+        mat    = pymupdf.Matrix(zoom_x, zoom_y).prerotate(rotate)
+        pix    = page.get_pixmap(matrix=mat, alpha=False)
 
         if not os.path.exists(imagePath):
             os.makedirs(imagePath) 
 
-        pix.writePNG(imagePath+'/'+'images_%s.png' % pg)
+        pix.save(imagePath+'/'+'images_%s.png' % pg)
 
     endTime_pdf2img = datetime.datetime.now()
     print('pdf2img time=',(endTime_pdf2img - startTime_pdf2img).seconds)

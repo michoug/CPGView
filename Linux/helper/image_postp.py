@@ -1,14 +1,14 @@
 import sys
-from fitz import fitz, Rect
+from pymupdf import pymupdf, Rect
 import PyPDF2
 
 def add_footer(pdf):
     img  = open(infile2, "rb").read()
     rect = Rect(298, 247, 444, 392)
 
-    for i in range(0, pdf.pageCount):
+    for i in range(0, pdf.page_count):
         page = pdf[i]
-        page.insertImage(rect, stream=img)
+        page.insert_image(rect, stream=img)
  
 if __name__ == "__main__":
 
@@ -19,7 +19,7 @@ if __name__ == "__main__":
     infile2  = sys.argv[2]
     outfile1 = sys.argv[3]
     outfile2 = sys.argv[4]
-    doc      = fitz.open(infile1)
+    doc      = pymupdf.open(infile1)
     
     add_footer(doc)
     doc.save(outfile1)

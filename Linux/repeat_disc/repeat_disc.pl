@@ -23,13 +23,13 @@ my $projectHomeDir = abs_path( $dir_work ); #absolute path to the projectHomeDir
 
 #print STDERR "\n-----step 9 find repetative elements-----\n\n";
 	my $cmd_misa    = "$Bin/exe/misa/misa.pl";
-        my $cmd_trf     = "$Bin/exe/trf409.legacylinux64";
-	my $cmd_repfind = "$Bin/exe/vmatch-2.3.0-Linux_x86_64-64bit/repfind.pl";
+    my $cmd_trf     = "trf";
+	my $cmd_repfind = "repfind.pl";
 	my $cmd         = "";
 
-        &printCMT("Mode 9: Additional Analysis: SSR, repeat elements");
-        my $projectFASTAFile   = $projectHomeDir."/".$project_id.".fas";
-        my $projectMISAIniFile = $projectHomeDir."/".$project_id.".misa.ini";
+    &printCMT("Mode 9: Additional Analysis: SSR, repeat elements");
+    my $projectFASTAFile   = $projectHomeDir."/".$project_id.".fas";
+    my $projectMISAIniFile = $projectHomeDir."/".$project_id.".misa.ini";
 	`cp $file_fas $projectFASTAFile`;
 
 ################## misa #######################
@@ -79,7 +79,7 @@ my $projectHomeDir = abs_path( $dir_work ); #absolute path to the projectHomeDir
 ################## vmatch #######################
         my $projectRepfind = $projectHomeDir."/".$project_id."_vmatch.txt";
         &printCMT("Start vmatch");
-        $cmd = "perl $cmd_repfind $para_vmatch $projectFASTAFile > $projectRepfind";
+        $cmd = "$cmd_repfind $para_vmatch $projectFASTAFile > $projectRepfind";
         #$cmd = "perl $cmd_repfind $para_vmatch $projectFASTAFile > $projectRepfind_prefiter";
         &printCMT($cmd); `$cmd`;
 

@@ -24,9 +24,9 @@ my $cmd        = "mkdir $outdir";
 `cp $inputfile $outdir/$inputfile1`;
 my $logfile    = $outdir."/".$projectid.".log";
 
-my $python     = "/apps/miniconda3/envs/cpgview/bin/python";
+my $python     = "python";
 #Location of Python，The user needs to change the path to the location of Python in the user's local computer.
-my $Rscript    = "/apps/miniconda3/envs/r4/bin/Rscript";
+my $Rscript    = "Rscript";
 #Location of R，The user needs to change the path to the location of R in the user's local computer.
 
 
