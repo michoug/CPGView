@@ -27,3 +27,6 @@ pypdf2 = "2.*"
 pillow = ">=12.2.0,<13"
 trf = ">=4.10.0rc2,<5"
 vmatch = "2.3.0.*"
+
+[activation]
+scripts = ["env_setup.sh"]

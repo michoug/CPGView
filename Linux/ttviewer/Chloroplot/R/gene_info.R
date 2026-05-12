@@ -9,67 +9,112 @@
 #' @import dplyr
 #' @export
 
-geneTableParsed <- function(gb, genome){
-  feature <- vector(mode = "list", length = length(gb$FEATURES))
-  names(feature) <- names(gb$FEATURES)
-  for (i in names(feature)){
-    feature[[i]] <- as.data.frame(gb$FEATURES[[i]])
-  }
-  type <- lapply(feature, "[[", "type")
-  cols <- c("start", "end", "strand",
-            "type", "gene", "pseudo", "product")
-  info <- NULL
-  for(i in 1:length(feature)){
-    tmp <- feature[[i]]
-    miscol <- cols[!cols %in% colnames(tmp)]
-    df <- data.frame(matrix(rep(NA, length(miscol) * nrow(tmp)),
-                            nrow = nrow(tmp), ncol = length(miscol)),
-                     stringsAsFactors = FALSE)
-    colnames(df) <- miscol
-    tmp <- cbind.data.frame(tmp, df)
-    tmp <- tmp[, which(colnames(tmp) %in% cols)]
-    info <- rbind.data.frame(info, tmp)
+geneTableParsed <- function(gb, genome) {
+  feature_types <- names(gb$FEATURES)
+
+  info <- dplyr::bind_rows(lapply(feature_types, function(ft) {
+    tryCatch(
+      {
+        df <- geneviewer::gbk_features_to_df(
+          list(record = gb),
+          feature = ft,
+          keys = c("region", "gene", "pseudo", "product")
+        )
+        if (!is.null(df) && nrow(df) > 0) {
+          df$type <- ft
+        }
+        df
+      },
+      error = function(e) NULL
+    )
+  }))
+
+  info$strand <- dplyr::case_when(
+    info$strand == "forward" ~ "+",
+    info$strand == "complement" ~ "-",
+    TRUE ~ info$strand
+  )
+
+  # Ensure required columns exist
+  cols <- c("start", "end", "strand", "type", "gene", "pseudo", "product")
+  for (col in cols) {
+    if (!col %in% colnames(info)) info[[col]] <- NA
   }
 
+  # Coerce start/end to integer
+  info$start <- as.integer(info$start)
+  info$end <- as.integer(info$end)
 
-  # gene
+  # Drop rows where coordinates failed to parse (e.g. join() syntax)
+  info <- info[!is.na(info$start) & !is.na(info$end), ]
+
+  # Drop wrap-around features where start > end (cross genome origin)
+  wrap <- info$start > info$end
+  if (any(wrap)) {
+    message(sprintf(
+      "Dropping %d wrap-around feature(s) (start > end): %s",
+      sum(wrap),
+      paste(
+        ifelse(is.na(info$gene[wrap]), info$type[wrap], info$gene[wrap]),
+        collapse = ", "
+      )
+    ))
+    info <- info[!wrap, ]
+  }
+
+  # Fill gene name from product where missing
   info$gene[is.na(info$gene)] <- info$product[is.na(info$gene)]
   info$pseudo[is.na(info$pseudo)] <- FALSE
 
+  # Normalise rRNA and tRNA gene names
   info$gene[grepl(".*([0-9\\.]+)S.*", info$gene)] <-
     rrnFixer(info$gene[grepl(".*([0-9\\.]+)S.*", info$gene)])
-  info$gene[grepl("^trn.*", info$gene, ignore.case=TRUE)] <-
-    trnFixer(info$gene[grepl("^trn.*", info$gene, ignore.case=TRUE)])
-
+  info$gene[grepl("^trn.*", info$gene, ignore.case = TRUE)] <-
+    trnFixer(info$gene[grepl("^trn.*", info$gene, ignore.case = TRUE)])
 
   gene_table <- info %>%
     dplyr::filter(type %in% c("gene", "tRNA", "rRNA")) %>%
     dplyr::select(start, end, strand, gene, pseudo) %>%
     stats::na.omit() %>%
     unique() %>%
-    dplyr::mutate(chr = rep("chr1", n()))
-  # for (i in 1:nrow(gene_table)){
-  #   if (gene_table$strand[i] == "-" ){
-  #     tmp <- gene_table$start[i]
-  #     gene_table$start[i] <- gene_table$end[i]
-  #     gene_table$end[i] <- tmp
-  #   }
-  # }
-  # gene_table <- select(gene_table, chr, start, end, gene)
+    dplyr::mutate(chr = rep("chr1", dplyr::n()))
 
-  # remove duplicated tRNA and rRNA
-  gene_table <- gene_table[order(gene_table[, "start"], -gene_table[, "end"]), ]
-  gene_table <- gene_table[!duplicated(gene_table[, c("start", "strand", "gene")]),]
-  gene_table <- gene_table[!duplicated(gene_table[, c("end", "strand", "gene")]),]
+  # Remove duplicated tRNA / rRNA entries
+  gene_table <- gene_table[order(gene_table$start, -gene_table$end), ]
+  gene_table <- gene_table[
+    !duplicated(gene_table[, c("start", "strand", "gene")]),
+  ]
+  gene_table <- gene_table[
+    !duplicated(gene_table[, c("end", "strand", "gene")]),
+  ]
 
-  # codon usage
-  cds <- info[which(info$type == "CDS"),]
-  cds_cu <- codonUsage(cds, genome)
-  gene_table <- dplyr::left_join(gene_table, cds_cu, by = c("gene", "strand",
-                                                            "start"))
+  # Codon usage bias
+  cds <- info[which(info$type == "CDS"), ]
+  cds_cu <- tryCatch(
+    codonUsage(cds, genome),
+    error = function(e) {
+      message("codonUsage failed: ", conditionMessage(e))
+      NULL
+    }
+  )
+  if (!is.null(cds_cu)) {
+    gene_table <- dplyr::left_join(
+      gene_table,
+      cds_cu,
+      by = c("gene", "strand", "start")
+    )
+  } else {
+    gene_table$cu_bias <- NA_real_
+  }
 
-  # gc content per gene
-  gene_table <- gc_count_gene(genome, gene_table)
+  # GC content per gene
+  gene_table <- tryCatch(
+    gc_count_gene(genome, gene_table),
+    error = function(e) {
+      message("gc_count_gene failed: ", conditionMessage(e))
+      gene_table # return unmodified rather than NULL
+    }
+  )
   return(gene_table)
 }
 
@@ -84,12 +129,12 @@ geneTableParsed <- function(gb, genome){
 #' @import dplyr
 #' @export
 
-geneTableRead <- function(gb, genome){
+geneTableRead <- function(gb, genome) {
   genes <- as.data.frame(genbankr::genes(gb))
 
   genes$gene[is.na(genes$gene)] <- genes$gene_id[is.na(genes$gene)]
 
-  if (!"pseudo" %in% colnames(genes)){
+  if (!"pseudo" %in% colnames(genes)) {
     genes$pseudo <- rep(FALSE, nrow(genes))
   }
   features <- as.data.frame(genbankr::otherFeatures(gb))
@@ -101,7 +146,7 @@ geneTableRead <- function(gb, genome){
 
   features$gene[is.na(features$gene)] <- features$product[is.na(features$gene)]
 
-  if (nrow(features) != 0){
+  if (nrow(features) != 0) {
     gene_table <- genes %>%
       select(start, end, gene, strand, pseudo) %>%
       rbind.data.frame(select(features, start, end, gene, strand, pseudo)) %>%
@@ -120,17 +165,24 @@ geneTableRead <- function(gb, genome){
 
   gene_table$gene[grepl(".*([0-9\\.]+)S.*", gene_table$gene)] <-
     rrnFixer(gene_table$gene[grepl(".*([0-9\\.]+)S.*", gene_table$gene)])
-  gene_table$gene[grepl("^trn.*", gene_table$gene, ignore.case=TRUE)] <-
-    trnFixer(gene_table$gene[grepl("^trn.*", gene_table$gene, ignore.case=TRUE)])
+  gene_table$gene[grepl("^trn.*", gene_table$gene, ignore.case = TRUE)] <-
+    trnFixer(gene_table$gene[grepl(
+      "^trn.*",
+      gene_table$gene,
+      ignore.case = TRUE
+    )])
 
   # codon usage
   cds <- as.data.frame(genbankr::cds(gb))
   cds_cu <- codonUsage(cds, genome)
-  if (is.null(cds_cu)){
+  if (is.null(cds_cu)) {
     gene_table$cu_bias <- rep(NA, nrow(gene_table))
   } else {
-    gene_table <- dplyr::left_join(gene_table, cds_cu,
-                                   by = c("gene", "strand", "start"))
+    gene_table <- dplyr::left_join(
+      gene_table,
+      cds_cu,
+      by = c("gene", "strand", "start")
+    )
   }
 
   # gc content per gene
@@ -138,7 +190,7 @@ geneTableRead <- function(gb, genome){
   return(gene_table)
 }
 
-rrnFixer <- function(rRNA){
+rrnFixer <- function(rRNA) {
   rRNA <- sub("[a-zA-Z]*([0-9\\.]*)S.*", "\\1", rRNA)
   rRNA <- paste("rrn", rRNA, sep = "")
 }
@@ -148,15 +200,54 @@ trnFixer <- function(tRNA) {
   #tRNA <- gene_table$gene[grepl("^trn.*", gene_table$gene, ignore.case=TRUE)]
   tRNA <- sub("-", "", tRNA)
   tRNA <- sub("^tRNA", "trn", tRNA)
-  aa_table <- rbind(c("Ala", "Arg", "Asn", "Asp", "Cys", "Glu",
-                      "Gln", "Gly", "His", "He", "Leu", "Lys",
-                      "Met", "Phe", "Pro", "Ser", "Thr", "Trp",
-                      "Tyr", "Val"),
-                    c("A", "R", "N", "D", "C", "E", "Q", "G", "H",
-                      "I", "L", "K", "M", "F", "P", "S", "T", "W",
-                      "Y", "V"))
+  aa_table <- rbind(
+    c(
+      "Ala",
+      "Arg",
+      "Asn",
+      "Asp",
+      "Cys",
+      "Glu",
+      "Gln",
+      "Gly",
+      "His",
+      "He",
+      "Leu",
+      "Lys",
+      "Met",
+      "Phe",
+      "Pro",
+      "Ser",
+      "Thr",
+      "Trp",
+      "Tyr",
+      "Val"
+    ),
+    c(
+      "A",
+      "R",
+      "N",
+      "D",
+      "C",
+      "E",
+      "Q",
+      "G",
+      "H",
+      "I",
+      "L",
+      "K",
+      "M",
+      "F",
+      "P",
+      "S",
+      "T",
+      "W",
+      "Y",
+      "V"
+    )
+  )
 
-  for (i in 1:ncol(aa_table)){
+  for (i in 1:ncol(aa_table)) {
     tRNA <- sub(aa_table[1, i], aa_table[2, i], tRNA)
   }
   tRNA <- sub("(trnf*[A-Z]).*", "\\1", tRNA)
@@ -165,32 +256,44 @@ trnFixer <- function(tRNA) {
   return(tRNA)
 }
 
-codonUsage <- function(cds, genome){
+codonUsage <- function(cds, genome) {
   # Forward strand
   cds_cu_f <- NULL
-  cds_f <- cds[which(cds$strand == "+"),]
+  cds_f <- cds[which(cds$strand == "+"), ]
   tmp <- cds_f
-  if (nrow(tmp) != 0){
-    cds_seq_f <- Biostrings::DNAStringSet(genome, start = cds_f$start[1],
-                                          end = cds_f$end[1])
-    if (nrow(tmp) > 1){
+  if (nrow(tmp) != 0) {
+    cds_seq_f <- Biostrings::DNAStringSet(
+      genome,
+      start = cds_f$start[1],
+      end = cds_f$end[1]
+    )
+    if (nrow(tmp) > 1) {
       i <- 2
-      repeat{
+      repeat {
         if (tmp$gene[i] == tmp$gene[i - 1]) {
-          cds_seq_f[[i - 1]] <- c(cds_seq_f[[i - 1]],
-                                  Biostrings::subseq(genome,
-                                                     start = cds_f$start[i],
-                                                     end = cds_f$end[i]))
+          cds_seq_f[[i - 1]] <- c(
+            cds_seq_f[[i - 1]],
+            Biostrings::subseq(
+              genome,
+              start = cds_f$start[i],
+              end = cds_f$end[i]
+            )
+          )
           t <- tmp[i, ]
           tmp <- tmp[-i, ]
         } else {
-          cds_seq_f <- append(cds_seq_f, Biostrings::DNAStringSet(genome,
-                                                                  start = cds_f$start[i],
-                                                                  end = cds_f$end[i]))
+          cds_seq_f <- append(
+            cds_seq_f,
+            Biostrings::DNAStringSet(
+              genome,
+              start = cds_f$start[i],
+              end = cds_f$end[i]
+            )
+          )
           t <- tmp[i, ]
           i <- i + 1
         }
-        if (identical(t, cds_f[nrow(cds_f),])) {
+        if (identical(t, cds_f[nrow(cds_f), ])) {
           break()
         } else {
           t <- NULL
@@ -201,38 +304,52 @@ codonUsage <- function(cds, genome){
     names(cds_seq_f) <- tmp$gene
     cds_cu_f <- coRdon::codonTable(cds_seq_f)
     cds_cu_f <- as.vector(coRdon::MILC(cds_cu_f))
-    cds_cu_f <- data.frame(cu_bias = cds_cu_f, gene = tmp$gene,
-                           start = tmp$start,
-                           strand = rep("+", nrow(tmp)),
-                           stringsAsFactors = FALSE)
+    cds_cu_f <- data.frame(
+      cu_bias = cds_cu_f,
+      gene = tmp$gene,
+      start = tmp$start,
+      strand = rep("+", nrow(tmp)),
+      stringsAsFactors = FALSE
+    )
   }
-
 
   # Reverse strand
   cds_cu_r <- NULL
-  cds_r <- cds[which(cds$strand == "-"),]
+  cds_r <- cds[which(cds$strand == "-"), ]
   tmp <- cds_r
-  if (nrow(tmp) != 0){
-    cds_seq_r <- Biostrings::DNAStringSet(genome, start = cds_r$start[1],
-                                          end = cds_r$end[1])
-    if (nrow(tmp) > 1){
+  if (nrow(tmp) != 0) {
+    cds_seq_r <- Biostrings::DNAStringSet(
+      genome,
+      start = cds_r$start[1],
+      end = cds_r$end[1]
+    )
+    if (nrow(tmp) > 1) {
       i <- 2
-      repeat{
+      repeat {
         if (tmp$gene[i] == tmp$gene[i - 1]) {
-          cds_seq_r[[i - 1]] <- c(cds_seq_r[[i - 1]],
-                                  Biostrings::subseq(genome,
-                                                     start = cds_r$start[i],
-                                                     end = cds_r$end[i]))
+          cds_seq_r[[i - 1]] <- c(
+            cds_seq_r[[i - 1]],
+            Biostrings::subseq(
+              genome,
+              start = cds_r$start[i],
+              end = cds_r$end[i]
+            )
+          )
           t <- tmp[i, ]
           tmp <- tmp[-i, ]
         } else {
-          cds_seq_r <- append(cds_seq_r, Biostrings::DNAStringSet(genome,
-                                                                  start = cds_r$start[i],
-                                                                  end = cds_r$end[i]))
+          cds_seq_r <- append(
+            cds_seq_r,
+            Biostrings::DNAStringSet(
+              genome,
+              start = cds_r$start[i],
+              end = cds_r$end[i]
+            )
+          )
           t <- tmp[i, ]
           i <- i + 1
         }
-        if (identical(t, cds_r[nrow(cds_r),])) {
+        if (identical(t, cds_r[nrow(cds_r), ])) {
           break()
         } else {
           t <- NULL
@@ -243,19 +360,22 @@ codonUsage <- function(cds, genome){
     cds_seq_r <- Biostrings::reverseComplement(cds_seq_r)
     cds_cu_r <- coRdon::codonTable(cds_seq_r)
     cds_cu_r <- as.vector(coRdon::MILC(cds_cu_r))
-    cds_cu_r <- data.frame(cu_bias = cds_cu_r, gene = tmp$gene,
-                           start = tmp$start,
-                           strand = rep("-", nrow(tmp)),
-                           stringsAsFactors = FALSE)
+    cds_cu_r <- data.frame(
+      cu_bias = cds_cu_r,
+      gene = tmp$gene,
+      start = tmp$start,
+      strand = rep("-", nrow(tmp)),
+      stringsAsFactors = FALSE
+    )
   }
 
-  if (!is.null(cds_cu_f) & !is.null(cds_cu_r)){
+  if (!is.null(cds_cu_f) & !is.null(cds_cu_r)) {
     cds_cu <- rbind.data.frame(cds_cu_f, cds_cu_r)
     colnames(cds_cu) <- c("cu_bias", "gene", "start", "strand")
-  } else if(!is.null(cds_cu_f)){
+  } else if (!is.null(cds_cu_f)) {
     cds_cu <- cds_cu_f
     colnames(cds_cu) <- c("cu_bias", "gene", "start", "strand")
-  } else if(!is.null(cds_cu_r)){
+  } else if (!is.null(cds_cu_r)) {
     cds_cu <- cds_cu_r
     colnames(cds_cu) <- c("cu_bias", "gene", "start", "strand")
   } else {
@@ -264,4 +384,3 @@ codonUsage <- function(cds, genome){
 
   return(cds_cu)
 }
-

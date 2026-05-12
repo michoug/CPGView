@@ -17,7 +17,8 @@
 #' @export
 #' @importFrom magrittr %>%
 #' @import dplyr
-PlotTab <- function(gbfile, local.file = FALSE, gc.window = 100){
+
+PlotTab <- function(gbfile, local.file = FALSE, gc.window = 100) {
   my_env <- new.env(parent = emptyenv())
   my_env$gb <- NULL
   my_env$def <- NULL
@@ -26,47 +27,31 @@ PlotTab <- function(gbfile, local.file = FALSE, gc.window = 100){
   my_env$l <- NULL
   my_env$gene_table <- NULL
   my_env$ir <- NULL
-  if (local.file){
-    tryCatch({
-      my_env$gb <- genbankr::readGenBank(gbfile)
-      my_env$genome <- genbankr::getSeq(my_env$gb)[[1]]
-      #genome <- rdnFixer(genome)
-      my_env$l<- Biostrings::nchar(my_env$genome)
-      my_env$def <- my_env$gb@definition
-      my_env$sp_name <- sp.name(my_env$def)
-      my_env$gene_table <- geneTableRead(my_env$gb, my_env$genome)
-    }, error = function(e){
-      my_env$gb <- genbankr::parseGenBank(gbfile)
-      my_env$def <- my_env$gb$DEFINITION
-      my_env$sp_name <- sp.name(my_env$def)
-      my_env$genome <- my_env$gb$ORIGIN[[1]]
-      my_env$l <- Biostrings::nchar(my_env$genome)
-      my_env$gene_table <- geneTableParsed(my_env$gb, my_env$genome)
-    })
 
+  # Helper: read a GenBank text string via a temp file
+
+  if (local.file) {
+    my_env$gb <- geneviewer::read_gbk(gbfile)[[1]]
+    my_env$def <- my_env$gb$DEFINITION
+    my_env$sp_name <- sp.name(my_env$def)
+    my_env$genome <- Biostrings::DNAString(my_env$gb$ORIGIN)
+    my_env$l <- Biostrings::nchar(my_env$genome)
+    my_env$gene_table <- geneTableParsed(my_env$gb, my_env$genome)
   } else {
-    tryCatch({
-      my_env$gb <- genbankr::readGenBank(text = fetch.gb(gbfile))
-      my_env$genome <- genbankr::getSeq(my_env$gb)
-      my_env$l <- Biostrings::nchar(my_env$genome)
-      my_env$def <- my_env$gb@definition
-      my_env$sp_name <- sp.name(my_env$df)
-      my_env$gene_table <- geneTableRead(my_env$gb, my_env$genome)
-    }, error = function(e){
-      my_env$gb <- genbankr::parseGenBank(text = fetch.gb(gbfile))
-      my_env$def <- my_env$gb$DEFINITION
-      my_env$sp_name <- sp.name(my_env$def)
-      my_env$genome <- my_env$gb$ORIGIN[[1]]
-      my_env$l <- Biostrings::nchar(my_env$genome)
-      my_env$gene_table <- geneTableParsed(my_env$gb, my_env$genome)
-    })
+    raw_text <- fetch.gb(gbfile)
+    my_env$gb <- .read_gbk_text(raw_text)
+    my_env$def <- my_env$gb$DEFINITION
+    my_env$sp_name <- sp.name(my_env$def)
+    my_env$genome <- Biostrings::DNAString(my_env$gb$ORIGIN)
+    my_env$l <- Biostrings::nchar(my_env$genome)
+    my_env$gene_table <- geneTableParsed(my_env$gb, my_env$genome)
   }
 
   # 1. Organelle ------------------------------------------------------------
 
   plastid <- TRUE
 
-  if (grepl("mitochondrion", my_env$def)){
+  if (grepl("mitochondrion", my_env$def)) {
     plastid <- FALSE
   }
 
@@ -74,32 +59,64 @@ PlotTab <- function(gbfile, local.file = FALSE, gc.window = 100){
   # when seed.size is too short it will raise some error in irDetect function
   # If it is too long, it cannot correctly detect the IR resions has mutation
   # closing the ends.
-  if (plastid){
-    tryCatch({
-      my_env$ir <- irDetect(my_env$genome, seed.size = 100)
-    }, error = function(e){
-      my_env$ir <- irDetect(my_env$genome, seed.size = 1000)
-    })
-    gene_class <- c("psa","psb","pet","atp","ndh","rbc","rpo","rps","rpl",
-                  "clp|mat|inf","ycf","trn","rrn")
+  if (plastid) {
+    tryCatch(
+      {
+        my_env$ir <- irDetect(my_env$genome, seed.size = 100)
+      },
+      error = function(e) {
+        my_env$ir <- irDetect(my_env$genome, seed.size = 1000)
+      }
+    )
+    gene_class <- c(
+      "psa",
+      "psb",
+      "pet",
+      "atp",
+      "ndh",
+      "rbc",
+      "rpo",
+      "rps",
+      "rpl",
+      "clp|mat|inf",
+      "ycf",
+      "trn",
+      "rrn"
+    )
   } else {
     my_env$ir <- list(ir_table = NULL, indel_table = NULL)
-    gene_class <- c("nad|nd","sdh","cob","cox|cytb","atp","ccmF","mtt","rps","rpl",
-                  "mat","orf","trn","rrn")
+    gene_class <- c(
+      "nad|nd",
+      "sdh",
+      "cob",
+      "cox|cytb",
+      "atp",
+      "ccmF",
+      "mtt",
+      "rps",
+      "rpl",
+      "mat",
+      "orf",
+      "trn",
+      "rrn"
+    )
   }
 
   my_env$gene_table$class <- rep("OTHER", nrow(my_env$gene_table))
 
-  for (i in gene_class){
-    my_env$gene_table$class[which(grepl(as.character(i),
-                                 my_env$gene_table$gene, perl = TRUE,
-                                ignore.case = TRUE))] <- i
+  for (i in gene_class) {
+    my_env$gene_table$class[which(grepl(
+      as.character(i),
+      my_env$gene_table$gene,
+      perl = TRUE,
+      ignore.case = TRUE
+    ))] <- i
   }
 
   # 3. GC count -------------------------------------------------------------
-  if (my_env$l > 500000){
+  if (my_env$l > 500000) {
     gc.window <- 200
-  } else if (my_env$l < 100000){
+  } else if (my_env$l < 100000) {
     gc.window <- 50
   }
   gc_count_list <- gc_count(my_env$genome, view.width = gc.window)
@@ -108,11 +125,17 @@ PlotTab <- function(gbfile, local.file = FALSE, gc.window = 100){
   gc_count$chr <- rep("chr1", nrow(gc_count))
   gc_count <- select(gc_count, chr, position, gc_count)
 
-  tables <- list(ir_table = my_env$ir$ir_table, indel_table = my_env$ir$indel_table,
-                 gc_count = gc_count, gc_total = gc_total, plastid = plastid,
-                 sp_name = my_env$sp_name, genome_len = my_env$l, gene_table = my_env$gene_table,
-                 genome = my_env$genome)
-
+  tables <- list(
+    ir_table = my_env$ir$ir_table,
+    indel_table = my_env$ir$indel_table,
+    gc_count = gc_count,
+    gc_total = gc_total,
+    plastid = plastid,
+    sp_name = my_env$sp_name,
+    genome_len = my_env$l,
+    gene_table = my_env$gene_table,
+    genome = my_env$genome
+  )
 
   return(tables)
 }
@@ -268,41 +291,80 @@ PlotTab <- function(gbfile, local.file = FALSE, gc.window = 100){
 #' @importFrom magrittr %>%
 #' @import dplyr
 #' @export
-PlotPlastidGenome <- function(plot.tables, save = TRUE, file.type = "pdf",
-                       text.size = 1, height = c(0.1, 0.08, 0.3),
-                       file.name = NULL, shadow = TRUE, ir.gc = TRUE,
-                       gc.per.gene = TRUE, pseudo = TRUE, legend = TRUE,
-                       ssc.converse = FALSE, lsc.converse = FALSE,
-                       ira.converse = FALSE, irb.converse = FALSE,
-                       genome.length = TRUE, total.gc = TRUE, show.indel = TRUE,
-                       gene.no = TRUE, rrn.no = TRUE,trn.no = TRUE,
-                       organelle_type = TRUE,
-                       background = "grey90",gc.color = "grey30",
-                       gc.background = "grey70", info.background = "black",
-                       ir.color = "#2F3941", ssc.color = "#82B6E2",
-                       lsc.color = "#299E96",shadow.color = "#0000FF20",
-                       psa.color = "#2A6332", psb.color = "#4C8805",
-                       pet.color = "#7F992C", atp.color = "#9FBB3D",
-                       ndh.color = "#FEEE50", rbc.color = "#4D9E3F",
-                       rpo.color = "#AE2D29", rsp.color = "#D6AD7C",
-                       rpl.color = "#9C7A4B", clp_mat_inf.color = "#D9662D",
-                       ycf.color = "#71B8A9", trn.color = "#172C7F",
-                       rrn.color = "#D1382A", other_gene.color = "#7D7D7D",
-                       show.genes = c("psa","psb","pet","atp","ndh","rbc",
-                                      "rpo","rps","rpl", "clp|mat|inf","ycf",
-                                      "trn","rrn", "OTHER"),
-                       gene_axis_ir.color = ir.color,
-                       gene_axis_ssc.color = ssc.color,
-                       gene_axis_lsc.color = lsc.color,
-                       cu.bias = TRUE, customize.ring1 = NULL,
-                       customize.ring1.type = "line",
-                       customize.ring1.color = gc.color,
-                       customize.ring2 = NULL,
-                       customize.ring2.type = "line",
-                       customize.ring2.color = gc.color,
-                       customize.ring3 = NULL,
-                       customize.ring3.color = gc.color){
-
+PlotPlastidGenome <- function(
+  plot.tables,
+  save = TRUE,
+  file.type = "pdf",
+  text.size = 1,
+  height = c(0.1, 0.08, 0.3),
+  file.name = NULL,
+  shadow = TRUE,
+  ir.gc = TRUE,
+  gc.per.gene = TRUE,
+  pseudo = TRUE,
+  legend = TRUE,
+  ssc.converse = FALSE,
+  lsc.converse = FALSE,
+  ira.converse = FALSE,
+  irb.converse = FALSE,
+  genome.length = TRUE,
+  total.gc = TRUE,
+  show.indel = TRUE,
+  gene.no = TRUE,
+  rrn.no = TRUE,
+  trn.no = TRUE,
+  organelle_type = TRUE,
+  background = "grey90",
+  gc.color = "grey30",
+  gc.background = "grey70",
+  info.background = "black",
+  ir.color = "#2F3941",
+  ssc.color = "#82B6E2",
+  lsc.color = "#299E96",
+  shadow.color = "#0000FF20",
+  psa.color = "#2A6332",
+  psb.color = "#4C8805",
+  pet.color = "#7F992C",
+  atp.color = "#9FBB3D",
+  ndh.color = "#FEEE50",
+  rbc.color = "#4D9E3F",
+  rpo.color = "#AE2D29",
+  rsp.color = "#D6AD7C",
+  rpl.color = "#9C7A4B",
+  clp_mat_inf.color = "#D9662D",
+  ycf.color = "#71B8A9",
+  trn.color = "#172C7F",
+  rrn.color = "#D1382A",
+  other_gene.color = "#7D7D7D",
+  show.genes = c(
+    "psa",
+    "psb",
+    "pet",
+    "atp",
+    "ndh",
+    "rbc",
+    "rpo",
+    "rps",
+    "rpl",
+    "clp|mat|inf",
+    "ycf",
+    "trn",
+    "rrn",
+    "OTHER"
+  ),
+  gene_axis_ir.color = ir.color,
+  gene_axis_ssc.color = ssc.color,
+  gene_axis_lsc.color = lsc.color,
+  cu.bias = TRUE,
+  customize.ring1 = NULL,
+  customize.ring1.type = "line",
+  customize.ring1.color = gc.color,
+  customize.ring2 = NULL,
+  customize.ring2.type = "line",
+  customize.ring2.color = gc.color,
+  customize.ring3 = NULL,
+  customize.ring3.color = gc.color
+) {
   # Unpack plot.table
   genome <- plot.tables$genome
   ir_table <- plot.tables$ir_table
@@ -318,16 +380,23 @@ PlotPlastidGenome <- function(plot.tables, save = TRUE, file.type = "pdf",
   # 1. Modify gene table
 
   # ssc covert
-  if (ssc.converse){
-    if (nrow(ir_table) == 1){
-      warning("Didn't get IR region from thid species. ",
-              "It's impossible to convert SSC region.")
-    } else{
-      tmp <- convert_region(ir_table = ir_table, l = l, region = "SSC",
-                            genome = genome, gene_table = gene_table,
-                            customize.ring1 = customize.ring1,
-                            customize.ring2 = customize.ring2,
-                            customize.ring3 = customize.ring3)
+  if (ssc.converse) {
+    if (nrow(ir_table) == 1) {
+      warning(
+        "Didn't get IR region from thid species. ",
+        "It's impossible to convert SSC region."
+      )
+    } else {
+      tmp <- convert_region(
+        ir_table = ir_table,
+        l = l,
+        region = "SSC",
+        genome = genome,
+        gene_table = gene_table,
+        customize.ring1 = customize.ring1,
+        customize.ring2 = customize.ring2,
+        customize.ring3 = customize.ring3
+      )
       gene_table <- tmp$gene_table
       gc_count <- tmp$gc_count
       gc_total <- tmp$gc_total
@@ -338,17 +407,24 @@ PlotPlastidGenome <- function(plot.tables, save = TRUE, file.type = "pdf",
   }
 
   # LSC covert
-  if (lsc.converse){
-    if (nrow(ir_table) == 1){
-      warning("Didn't get IR region from thid species. ",
-              "It's impossible to convert LSC region.")
+  if (lsc.converse) {
+    if (nrow(ir_table) == 1) {
+      warning(
+        "Didn't get IR region from thid species. ",
+        "It's impossible to convert LSC region."
+      )
       gene_table <- gene_table
-    } else{
-      tmp <- convert_region(ir_table = ir_table, l = l, region = "LSC",
-                            genome = genome, gene_table = gene_table,
-                            customize.ring1 = customize.ring1,
-                            customize.ring2 = customize.ring2,
-                            customize.ring3 = customize.ring3)
+    } else {
+      tmp <- convert_region(
+        ir_table = ir_table,
+        l = l,
+        region = "LSC",
+        genome = genome,
+        gene_table = gene_table,
+        customize.ring1 = customize.ring1,
+        customize.ring2 = customize.ring2,
+        customize.ring3 = customize.ring3
+      )
       gene_table <- tmp$gene_table
       gc_count <- tmp$gc_count
       gc_total <- tmp$gc_total
@@ -359,17 +435,24 @@ PlotPlastidGenome <- function(plot.tables, save = TRUE, file.type = "pdf",
   }
 
   # IRA covert
-  if (ira.converse){
-    if (nrow(ir_table) == 1){
-      warning("Didn't get IR region from thid species. ",
-              "It's impossible to convert IRA region.")
-    } else{
-      tmp <- convert_region(ir_table = ir_table, l = l, region = "IRA",
-                            genome = genome, gene_table = gene_table,
-                            customize.ring1 = customize.ring1,
-                            customize.ring2 = customize.ring2,
-                            customize.ring3 = customize.ring3,
-                            indel_table = indel_table)
+  if (ira.converse) {
+    if (nrow(ir_table) == 1) {
+      warning(
+        "Didn't get IR region from thid species. ",
+        "It's impossible to convert IRA region."
+      )
+    } else {
+      tmp <- convert_region(
+        ir_table = ir_table,
+        l = l,
+        region = "IRA",
+        genome = genome,
+        gene_table = gene_table,
+        customize.ring1 = customize.ring1,
+        customize.ring2 = customize.ring2,
+        customize.ring3 = customize.ring3,
+        indel_table = indel_table
+      )
       gene_table <- tmp$gene_table
       gc_count <- tmp$gc_count
       gc_total <- tmp$gc_total
@@ -381,18 +464,25 @@ PlotPlastidGenome <- function(plot.tables, save = TRUE, file.type = "pdf",
   }
 
   # IRB covert
-  if (irb.converse){
-    if (nrow(ir_table) == 1){
-      warning("Didn't get IR region from thid species. ",
-              "It's impossible to convert IRB region.")
+  if (irb.converse) {
+    if (nrow(ir_table) == 1) {
+      warning(
+        "Didn't get IR region from thid species. ",
+        "It's impossible to convert IRB region."
+      )
       gene_table <- gene_table
-    } else{
-      tmp <- convert_region(ir_table = ir_table, l = l, region = "IRB",
-                            genome = genome, gene_table = gene_table,
-                            customize.ring1 = customize.ring1,
-                            customize.ring2 = customize.ring2,
-                            customize.ring3 = customize.ring3,
-                            indel_table = indel_table)
+    } else {
+      tmp <- convert_region(
+        ir_table = ir_table,
+        l = l,
+        region = "IRB",
+        genome = genome,
+        gene_table = gene_table,
+        customize.ring1 = customize.ring1,
+        customize.ring2 = customize.ring2,
+        customize.ring3 = customize.ring3,
+        indel_table = indel_table
+      )
       gene_table <- tmp$gene_table
       gc_count <- tmp$gc_count
       gc_total <- tmp$gc_total
@@ -404,43 +494,63 @@ PlotPlastidGenome <- function(plot.tables, save = TRUE, file.type = "pdf",
   }
 
   # colouring
-  color_table <- plastidGeneColor(psa.color = psa.color, psb.color = psb.color,
-                           pet.color = pet.color, atp.color = atp.color,
-                           ndh.color = ndh.color, rbc.color = rbc.color,
-                           rpo.color = rpo.color, rsp.color = rsp.color,
-                           rpl.color = rpl.color, clp_mat_inf.color = clp_mat_inf.color,
-                           ycf.color = ycf.color, trn.color = trn.color,
-                           rrn.color = rrn.color, other_gene.color = other_gene.color)
+  color_table <- plastidGeneColor(
+    psa.color = psa.color,
+    psb.color = psb.color,
+    pet.color = pet.color,
+    atp.color = atp.color,
+    ndh.color = ndh.color,
+    rbc.color = rbc.color,
+    rpo.color = rpo.color,
+    rsp.color = rsp.color,
+    rpl.color = rpl.color,
+    clp_mat_inf.color = clp_mat_inf.color,
+    ycf.color = ycf.color,
+    trn.color = trn.color,
+    rrn.color = rrn.color,
+    other_gene.color = other_gene.color
+  )
 
-  gene_table <- dplyr::left_join(gene_table, color_table, by = c("class" = "acronym"))
+  gene_table <- dplyr::left_join(
+    gene_table,
+    color_table,
+    by = c("class" = "acronym")
+  )
 
   gene_table <- gene_table[which(gene_table$class %in% show.genes), ]
 
-  color_table <- color_table[which(color_table$acronym %in% unique(gene_table$class)), ]
+  color_table <- color_table[
+    which(color_table$acronym %in% unique(gene_table$class)),
+  ]
 
   # gene labels
   gene_table$gene_label <- gene_table$gene
-  if (cu.bias){
-    gene_table$gene_label <- apply(gene_table[, c("gene_label", "cu_bias")], 1,
-                          function(x){
-                            if (is.na(x[2])){
-                              return(x[1])
-                            } else {
-                              return(paste0(x[1], " (",
-                                            signif(as.numeric(x[2]), 2), ")"))
-                            }
-                          })
+  if (cu.bias) {
+    gene_table$gene_label <- apply(
+      gene_table[, c("gene_label", "cu_bias")],
+      1,
+      function(x) {
+        if (is.na(x[2])) {
+          return(x[1])
+        } else {
+          return(paste0(x[1], " (", signif(as.numeric(x[2]), 2), ")"))
+        }
+      }
+    )
   }
 
-  if (pseudo){
-    gene_table$gene_label <- apply(gene_table[, c("gene_label", "pseudo")], 1,
-                                   function(x){
-                                     if (x[2]){
-                                       return(paste0(x[1], " *"))
-                                     } else {
-                                       return(x[1])
-                                     }
-                                   })
+  if (pseudo) {
+    gene_table$gene_label <- apply(
+      gene_table[, c("gene_label", "pseudo")],
+      1,
+      function(x) {
+        if (x[2]) {
+          return(paste0(x[1], " *"))
+        } else {
+          return(x[1])
+        }
+      }
+    )
   }
   genome <- genome
   gene_table_r <- filter(gene_table, strand == "-") %>%
@@ -457,7 +567,6 @@ PlotPlastidGenome <- function(plot.tables, save = TRUE, file.type = "pdf",
   ir_table$bg_col[grepl("IR", ir_table$name)] <- ir.color
   ir_table$bg_col[ir_table$name == "Genome"] <- lsc.color
 
-
   ir_table$axis_col <- rep(NA, nrow(ir_table))
   ir_table$axis_col[ir_table$name == "LSC"] <- gene_axis_lsc.color
   ir_table$axis_col[ir_table$name == "SSC"] <- gene_axis_ssc.color
@@ -468,16 +577,17 @@ PlotPlastidGenome <- function(plot.tables, save = TRUE, file.type = "pdf",
   info.color <- CompColor(info.background)
 
   ir_table$inf_col <- rep(NA, nrow(ir_table))
-  ir_table$inf_col[ir_table$name=="LSC"] <- CompColor(lsc.color)
-  ir_table$inf_col[ir_table$name=="SSC"] <- CompColor(ssc.color)
+  ir_table$inf_col[ir_table$name == "LSC"] <- CompColor(lsc.color)
+  ir_table$inf_col[ir_table$name == "SSC"] <- CompColor(ssc.color)
   ir_table$inf_col[grepl("IR", ir_table$name)] <- CompColor(ir.color)
   ir_table$inf_col[ir_table$name == "Genome"] <- CompColor(lsc.color)
 
-  if (!is.null(indel_table)){
-    indel_table$bg_color <- rep("White", #Transparent("#FFFFFF", 0.9),
-                                            nrow(indel_table))
+  if (!is.null(indel_table)) {
+    indel_table$bg_color <- rep(
+      "White", #Transparent("#FFFFFF", 0.9),
+      nrow(indel_table)
+    )
   }
-
 
   ir_table$y <- rep(0.85, nrow(ir_table))
   ir_table$y[grepl("IR", ir_table$name)] <- 0.85
@@ -489,28 +599,42 @@ PlotPlastidGenome <- function(plot.tables, save = TRUE, file.type = "pdf",
 
   # 4. Generate plot
   # Initialize the plot device
-  if (save){
-    if (is.null(file.name)){
+  if (save) {
+    if (is.null(file.name)) {
       file <- sp_name
     } else {
       file <- file.name
     }
-    if (!file.type %in% c("jpeg", "bmp", "png", "tiff", "pdf")){
-      warning("Can not save plot in ", file.type, " format. Avaliable formats
-                are 'jpeg', 'bmp', 'png', 'tiff',and 'pdf'.")
-    } else if (file.type  == "pdf") {
-      grDevices::pdf(paste(file, file.type, sep="."), width=10.3, height=8.9)
+    if (!file.type %in% c("jpeg", "bmp", "png", "tiff", "pdf")) {
+      warning(
+        "Can not save plot in ",
+        file.type,
+        " format. Avaliable formats
+                are 'jpeg', 'bmp', 'png', 'tiff',and 'pdf'."
+      )
+    } else if (file.type == "pdf") {
+      grDevices::pdf(
+        paste(file, file.type, sep = "."),
+        width = 10.3,
+        height = 8.9
+      )
     } else {
-      do.call(file.type, args=list(filename=paste(file, file.type, sep="."),
-                                   width = 10.3, height = 8.9, units = "in",
-                                   res = 1000))
+      do.call(
+        file.type,
+        args = list(
+          filename = paste(file, file.type, sep = "."),
+          width = 10.3,
+          height = 8.9,
+          units = "in",
+          res = 1000
+        )
+      )
     }
   }
 
-
   # Initialize the layout
-  ssc_deg<-ir_table$center[which(ir_table$name=="SSC")][1]
-  if ((length(ssc_deg) == 1) & !is.na(ssc_deg)){
+  ssc_deg <- ir_table$center[which(ir_table$name == "SSC")][1]
+  if ((length(ssc_deg) == 1) & !is.na(ssc_deg)) {
     rotate <- 180
   } else {
     rotate <- 180
@@ -518,245 +642,328 @@ PlotPlastidGenome <- function(plot.tables, save = TRUE, file.type = "pdf",
 
   # Track indexes
   track_index <- 1:8
-  names(track_index) <- c("gene out 1", "gene out 2", "gene", "gene inner 1",
-                          "gene inner 2", "arrow", "gc count", "ir region")
+  names(track_index) <- c(
+    "gene out 1",
+    "gene out 2",
+    "gene",
+    "gene inner 1",
+    "gene inner 2",
+    "arrow",
+    "gc count",
+    "ir region"
+  )
 
-  if (!is.null(customize.ring1)){
-    track_index[c("arrow", "gc count", "ir region")] <- track_index[c("arrow", "gc count", "ir region")] + 1
+  if (!is.null(customize.ring1)) {
+    track_index[c("arrow", "gc count", "ir region")] <- track_index[c(
+      "arrow",
+      "gc count",
+      "ir region"
+    )] +
+      1
     track_index["customize 1"] <- track_index["gene inner 2"] + 1
   }
 
-  if (!is.null(customize.ring2)){
-    track_index[c("arrow", "gc count", "ir region")] <- track_index[c("arrow", "gc count", "ir region")] + 1
+  if (!is.null(customize.ring2)) {
+    track_index[c("arrow", "gc count", "ir region")] <- track_index[c(
+      "arrow",
+      "gc count",
+      "ir region"
+    )] +
+      1
     track_index["customize 2"] <- track_index["arrow"] - 1
   }
 
-  if (!is.null(customize.ring3)){
-    track_index[c("arrow", "gc count", "ir region")] <- track_index[c("arrow", "gc count", "ir region")] + 1
+  if (!is.null(customize.ring3)) {
+    track_index[c("arrow", "gc count", "ir region")] <- track_index[c(
+      "arrow",
+      "gc count",
+      "ir region"
+    )] +
+      1
     track_index["customize 3"] <- track_index["arrow"] - 1
   }
 
   # Track heights
-  n_customize_ring <- sum(c(!is.null(customize.ring1), !is.null(customize.ring2), !is.null(customize.ring3)))
-  if (n_customize_ring == 1){
-    height[2] <- height[2]/1.5
+  n_customize_ring <- sum(c(
+    !is.null(customize.ring1),
+    !is.null(customize.ring2),
+    !is.null(customize.ring3)
+  ))
+  if (n_customize_ring == 1) {
+    height[2] <- height[2] / 1.5
   } else if (n_customize_ring == 2) {
-    height[2] <- height[2]/2
+    height[2] <- height[2] / 2
     height[3] <- height[3] * 0.7
   } else if (n_customize_ring == 3) {
-    height[2] <- height[2]/2
+    height[2] <- height[2] / 2
     height[3] <- height[3] * 0.7
-    height[1] <- height[1] *0.7
+    height[1] <- height[1] * 0.7
   }
 
   circlize::circos.clear()
-  circlize::circos.par(start.degree = rotate,
-                       gap.after = 0,
-                       track.margin = c(0, 0), cell.padding = c(0, 0, 0, 0))
-  circlize::circos.genomicInitialize(data=data.frame(chr="chr1", start=0, end=l,
-                                                     stringsAsFactors = FALSE),
-                                     plotType = NULL)
+  circlize::circos.par(
+    start.degree = rotate,
+    gap.after = 0,
+    track.margin = c(0, 0),
+    cell.padding = c(0, 0, 0, 0)
+  )
+  circlize::circos.genomicInitialize(
+    data = data.frame(
+      chr = "chr1",
+      start = 0,
+      end = l,
+      stringsAsFactors = FALSE
+    ),
+    plotType = NULL
+  )
 
   # 1.2. gene label outside
-  if (nrow(gene_table_r) == 0 ) {
+  if (nrow(gene_table_r) == 0) {
     # Background
-    circlize::draw.sector(0, 360,
-                          rou1 = 1,
-                          rou2 = 0,
-                          col = background, border = NA)
+    circlize::draw.sector(
+      0,
+      360,
+      rou1 = 1,
+      rou2 = 0,
+      col = background,
+      border = NA
+    )
   } else {
-    circlize::circos.genomicLabels(gene_table_r, labels = gene_table_r$gene_label,
-                                   side = "outside",cex = 0.62 * text.size,
-                                   connection_height = circlize::convert_height(3, "mm"),
-                                   labels_height = max(graphics::strwidth(gene_table_r$gene_label,
-                                                                          cex = 0.5 * text.size,
-                                                                          font = graphics::par("font")))
+    circlize::circos.genomicLabels(
+      gene_table_r,
+      labels = gene_table_r$gene_label,
+      side = "outside",
+      cex = 0.62 * text.size,
+      connection_height = circlize::convert_height(3, "mm"),
+      labels_height = max(graphics::strwidth(
+        gene_table_r$gene_label,
+        cex = 0.5 * text.size,
+        font = graphics::par("font")
+      ))
     )
     # Background
-    circlize::draw.sector(0, 360,
-                          rou1 = circlize::get.cell.meta.data("cell.bottom.radius",
-                                                              track.index = 2),
-                          rou2 = 0,
-                          col = background, border = NA)
+    circlize::draw.sector(
+      0,
+      360,
+      rou1 = circlize::get.cell.meta.data(
+        "cell.bottom.radius",
+        track.index = 2
+      ),
+      rou2 = 0,
+      col = background,
+      border = NA
+    )
   }
-
-
 
   # 3. Gene rectangles
   if (nrow(gene_table_r) != 0 & nrow(gene_table_f) != 0) {
-    circlize::circos.genomicTrack(gene_table_f, factors = as.factor("chr1"),
-                                  ylim = c(-1, 1), bg.border = NA,
-                                  track.height = height[1], #circlize::convert_height(10, "mm"),
-                                  panel.fun = function(region, value, ...) {
+    circlize::circos.genomicTrack(
+      gene_table_f,
+      factors = as.factor("chr1"),
+      ylim = c(-1, 1),
+      bg.border = NA,
+      track.height = height[1], #circlize::convert_height(10, "mm"),
+      panel.fun = function(region, value, ...) {
+        if (gc.per.gene) {
+          # genes lay on forward chain
+          circlize::circos.genomicRect(
+            gene_table_f[, c("start", "end")],
+            value = gene_table_f$gene,
+            ybottom = -gene_table_f$gc_count,
+            ytop = 0,
+            col = gene_table_f$col,
+            border = NA
+          )
+          circlize::circos.genomicRect(
+            gene_table_f[, c("start", "end")],
+            value = gene_table_f$gene,
+            ybottom = -1,
+            ytop = 0,
+            lwd = 0.5,
+            col = Transparent(gene_table_f$col, 0.7),
+            border = NA
+          )
 
-                                    if(gc.per.gene){
-                                      # genes lay on forward chain
-                                      circlize::circos.genomicRect(
-                                        gene_table_f[, c("start", "end")],
-                                        value = gene_table_f$gene,
-                                        ybottom = - gene_table_f$gc_count,
-                                        ytop = 0,
-                                        col = gene_table_f$col,
-                                        border = NA)
-                                      circlize::circos.genomicRect(
-                                        gene_table_f[, c("start", "end")],
-                                        value = gene_table_f$gene,
-                                        ybottom = -1,
-                                        ytop = 0,
-                                        lwd = 0.5,
-                                        col = Transparent(gene_table_f$col, 0.7),
-                                        border = NA
-                                      )
+          # genes lay on reverse chain
+          circlize::circos.genomicRect(
+            gene_table_r[, c("start", "end")],
+            value = gene_table_r$gene,
+            ybottom = 0,
+            ytop = gene_table_r$gc_count,
+            col = gene_table_r$col,
+            border = NA
+          )
+          circlize::circos.genomicRect(
+            gene_table_r[, c("start", "end")],
+            value = gene_table_r$gene,
+            ybottom = 0,
+            ytop = 1,
+            lwd = 0.5,
+            col = Transparent(gene_table_r$col, 0.7),
+            border = NA
+          )
+        } else {
+          # genes lay on forward chain
+          circlize::circos.genomicRect(
+            gene_table_f[, c("start", "end")],
+            value = gene_table_f$gene,
+            ybottom = -1,
+            ytop = 0,
+            lwd = 0.5,
+            col = gene_table_f$col
+          )
 
-                                      # genes lay on reverse chain
-                                      circlize::circos.genomicRect(
-                                        gene_table_r[, c("start", "end")],
-                                        value = gene_table_r$gene,
-                                        ybottom = 0,
-                                        ytop = gene_table_r$gc_count,
-                                        col = gene_table_r$col,
-                                        border = NA)
-                                      circlize::circos.genomicRect(
-                                        gene_table_r[, c("start", "end")],
-                                        value = gene_table_r$gene,
-                                        ybottom = 0,
-                                        ytop = 1,
-                                        lwd = 0.5,
-                                        col = Transparent(gene_table_r$col, 0.7),
-                                        border = NA
-                                      )
-                                    } else {
-                                      # genes lay on forward chain
-                                      circlize::circos.genomicRect(
-                                        gene_table_f[, c("start", "end")],
-                                        value = gene_table_f$gene,
-                                        ybottom = -1,
-                                        ytop = 0,
-                                        lwd = 0.5,
-                                        col = gene_table_f$col
-                                      )
+          circlize::circos.genomicRect(
+            gene_table_r[, c("start", "end")],
+            value = gene_table_r$gene,
+            ybottom = 0,
+            ytop = 1,
+            lwd = 0.5,
+            col = gene_table_r$col
+          )
+        }
 
-                                      circlize::circos.genomicRect(
-                                        gene_table_r[, c("start", "end")],
-                                        value = gene_table_r$gene,
-                                        ybottom = 0,
-                                        ytop = 1,
-                                        lwd = 0.5,
-                                        col = gene_table_r$col
-                                      )
-                                    }
-
-                                    # the bars in the middle indicate the IR, SSR, LSR
-                                    circlize::circos.rect(xleft = ir_table$start,
-                                                          ybottom = - 0.05,
-                                                          xright = ir_table$end,
-                                                          ytop = 0.05,
-                                                          col = ir_table$axis_col,
-                                                          border = NA)
-                                  })
-  } else if (nrow(gene_table_f) != 0){
-  circlize::circos.genomicTrack(gene_table_f, factors = as.factor("chr1"),
-                                 ylim = c(-1, 1), bg.border = NA,
-                                 track.height = height[1], #circlize::convert_height(10, "mm"),
-                                 panel.fun = function(region, value, ...) {
-
-                                   if (gc.per.gene){
-                                     # genes lay on forward chain
-                                     circlize::circos.genomicRect(
-                                       gene_table_f[, c("start", "end")],
-                                       value = gene_table_f$gene,
-                                       ybottom = - gene_table_f$gc_count,
-                                       ytop = 0,
-                                       col = gene_table_f$col,
-                                       border = NA)
-                                     circlize::circos.genomicRect(
-                                       gene_table_f[, c("start", "end")],
-                                       value = gene_table_f$gene,
-                                       ybottom = -1,
-                                       ytop = 0,
-                                       lwd = 0.5,
-                                       col = Transparent(gene_table_f$col, 0.7),
-                                       border = NA
-                                     )
-                                   } else {
-                                     # genes lay on forward chain
-                                     circlize::circos.genomicRect(
-                                       gene_table_f[, c("start", "end")],
-                                       value = gene_table_f$gene,
-                                       ybottom = -1,
-                                       ytop = 0,
-                                       lwd = 0.5,
-                                       col = gene_table_f$col
-                                     )
-                                   }
-                                   # the bars in the middle indicate the IR, SSR, LSR
-                                   circlize::circos.rect(xleft = ir_table$start,
-                                                         ybottom = - 0.05,
-                                                         xright = ir_table$end,
-                                                         ytop = 0.05,
-                                                         col = ir_table$axis_col,
-                                                         border = NA)
-                                 })
+        # the bars in the middle indicate the IR, SSR, LSR
+        circlize::circos.rect(
+          xleft = ir_table$start,
+          ybottom = -0.05,
+          xright = ir_table$end,
+          ytop = 0.05,
+          col = ir_table$axis_col,
+          border = NA
+        )
+      }
+    )
+  } else if (nrow(gene_table_f) != 0) {
+    circlize::circos.genomicTrack(
+      gene_table_f,
+      factors = as.factor("chr1"),
+      ylim = c(-1, 1),
+      bg.border = NA,
+      track.height = height[1], #circlize::convert_height(10, "mm"),
+      panel.fun = function(region, value, ...) {
+        if (gc.per.gene) {
+          # genes lay on forward chain
+          circlize::circos.genomicRect(
+            gene_table_f[, c("start", "end")],
+            value = gene_table_f$gene,
+            ybottom = -gene_table_f$gc_count,
+            ytop = 0,
+            col = gene_table_f$col,
+            border = NA
+          )
+          circlize::circos.genomicRect(
+            gene_table_f[, c("start", "end")],
+            value = gene_table_f$gene,
+            ybottom = -1,
+            ytop = 0,
+            lwd = 0.5,
+            col = Transparent(gene_table_f$col, 0.7),
+            border = NA
+          )
+        } else {
+          # genes lay on forward chain
+          circlize::circos.genomicRect(
+            gene_table_f[, c("start", "end")],
+            value = gene_table_f$gene,
+            ybottom = -1,
+            ytop = 0,
+            lwd = 0.5,
+            col = gene_table_f$col
+          )
+        }
+        # the bars in the middle indicate the IR, SSR, LSR
+        circlize::circos.rect(
+          xleft = ir_table$start,
+          ybottom = -0.05,
+          xright = ir_table$end,
+          ytop = 0.05,
+          col = ir_table$axis_col,
+          border = NA
+        )
+      }
+    )
     track_index[3:length(track_index)] <- track_index[3:length(track_index)] - 2
-    track_index <- track_index[-which(names(track_index) %in% c("gene out 1", "gene out 2"))]
+    track_index <- track_index[
+      -which(names(track_index) %in% c("gene out 1", "gene out 2"))
+    ]
   } else if (nrow(gene_table_r) != 0) {
-    circlize::circos.genomicTrack(gene_table_r, factors = as.factor("chr1"),
-                                  ylim = c(-1, 1), bg.border = NA,
-                                  track.height = height[1], #circlize::convert_height(10, "mm"),
-                                  panel.fun = function(region, value, ...) {
+    circlize::circos.genomicTrack(
+      gene_table_r,
+      factors = as.factor("chr1"),
+      ylim = c(-1, 1),
+      bg.border = NA,
+      track.height = height[1], #circlize::convert_height(10, "mm"),
+      panel.fun = function(region, value, ...) {
+        if (gc.per.gene) {
+          # genes lay on reverse chain
+          circlize::circos.genomicRect(
+            gene_table_r[, c("start", "end")],
+            value = gene_table_r$gene,
+            ybottom = 0,
+            ytop = gene_table_r$gc_count,
+            col = gene_table_r$col,
+            border = NA
+          )
+          circlize::circos.genomicRect(
+            gene_table_r[, c("start", "end")],
+            value = gene_table_r$gene,
+            ybottom = 0,
+            ytop = 1,
+            lwd = 0.5,
+            col = Transparent(gene_table_r$col, 0.7),
+            border = NA
+          )
+        } else {
+          circlize::circos.genomicRect(
+            gene_table_r[, c("start", "end")],
+            value = gene_table_r$gene,
+            ybottom = 0,
+            ytop = 1,
+            lwd = 0.5,
+            col = gene_table_r$col
+          )
+        }
 
-                                    if(gc.per.gene){
-                                      # genes lay on reverse chain
-                                      circlize::circos.genomicRect(
-                                        gene_table_r[, c("start", "end")],
-                                        value = gene_table_r$gene,
-                                        ybottom = 0,
-                                        ytop = gene_table_r$gc_count,
-                                        col = gene_table_r$col,
-                                        border = NA)
-                                      circlize::circos.genomicRect(
-                                        gene_table_r[, c("start", "end")],
-                                        value = gene_table_r$gene,
-                                        ybottom = 0,
-                                        ytop = 1,
-                                        lwd = 0.5,
-                                        col = Transparent(gene_table_r$col, 0.7),
-                                        border = NA
-                                      )
-                                    } else {
-                                      circlize::circos.genomicRect(
-                                        gene_table_r[, c("start", "end")],
-                                        value = gene_table_r$gene,
-                                        ybottom = 0,
-                                        ytop = 1,
-                                        lwd = 0.5,
-                                        col = gene_table_r$col
-                                      )
-                                    }
-
-                                    # the bars in the middle indicate the IR, SSR, LSR
-                                    circlize::circos.rect(xleft = ir_table$start,
-                                                          ybottom = - 0.05,
-                                                          xright = ir_table$end,
-                                                          ytop = 0.05,
-                                                          col = ir_table$axis_col,
-                                                          border = NA)
-                                  })
-    track_index[(which(names(track_index) == "gene inner 2") + 1):length(track_index)] <-
-      track_index[(which(names(track_index) == "gene inner 2") + 1):length(track_index)] - 2
-    track_index <- track_index[-which(names(track_index) %in% c("gene inner 1", "gene inner 2"))]
+        # the bars in the middle indicate the IR, SSR, LSR
+        circlize::circos.rect(
+          xleft = ir_table$start,
+          ybottom = -0.05,
+          xright = ir_table$end,
+          ytop = 0.05,
+          col = ir_table$axis_col,
+          border = NA
+        )
+      }
+    )
+    track_index[
+      (which(names(track_index) == "gene inner 2") + 1):length(track_index)
+    ] <-
+      track_index[
+        (which(names(track_index) == "gene inner 2") + 1):length(track_index)
+      ] -
+      2
+    track_index <- track_index[
+      -which(names(track_index) %in% c("gene inner 1", "gene inner 2"))
+    ]
   } else {
-    track_index <- track_index[6:length(track_index)] -5
+    track_index <- track_index[6:length(track_index)] - 5
   }
 
   # 4.5. gene labels inside
-  if (nrow(gene_table_f) != 0){
-    circlize::circos.genomicLabels(gene_table_f, labels = gene_table_f$gene_label,
-                                   side = "inside", cex = 0.62 * text.size,
-                                   connection_height = circlize::convert_height(3, "mm"),
-                                   labels_height = max(graphics::strwidth(gene_table_f$gene_label,
-                                                                          cex = 0.5 * text.size,
-                                                                          font = graphics::par("font"))))
+  if (nrow(gene_table_f) != 0) {
+    circlize::circos.genomicLabels(
+      gene_table_f,
+      labels = gene_table_f$gene_label,
+      side = "inside",
+      cex = 0.62 * text.size,
+      connection_height = circlize::convert_height(3, "mm"),
+      labels_height = max(graphics::strwidth(
+        gene_table_f$gene_label,
+        cex = 0.5 * text.size,
+        font = graphics::par("font")
+      ))
+    )
   }
 
   # customized ring 1
@@ -769,39 +976,88 @@ PlotPlastidGenome <- function(plot.tables, save = TRUE, file.type = "pdf",
       ylim[1] <- 0
       bar_color <- rep(customize.ring1.color, nrow(customize.ring1))
     }
-    if (max(customize.ring1$value) < 0){
+    if (max(customize.ring1$value) < 0) {
       ylim[2] <- 0
       bar_color <- rep(customize.ring1.color, nrow(customize.ring1))
     }
-    style <- switch(customize.ring1.type,
-           "line" = list(type = "l", arear = FALSE, col = customize.ring1.color, lwd = 0.5),
-           "line + filling" = list(type = "l", arear = TRUE, col = customize.ring1.color, lwd = 0.01),
-           "line + dot" = list(type = "o", arear = FALSE, col = bar_color, lwd = 0.5),
-           "line + dot + filling" = list(type = "o", arear = TRUE, col = bar_color, lwd = 0.01),
-           "step line" = list(type = "s", arear = FALSE, col = customize.ring1.color, lwd = 0.5),
-           "step line + filling" = list(type = "s", arear = TRUE, col = customize.ring1.color, lwd = 0.01),
-           "vertical line" = list(type = "h", arear = FALSE, col = bar_color, lwd = 0.5))
+    style <- switch(
+      customize.ring1.type,
+      "line" = list(
+        type = "l",
+        arear = FALSE,
+        col = customize.ring1.color,
+        lwd = 0.5
+      ),
+      "line + filling" = list(
+        type = "l",
+        arear = TRUE,
+        col = customize.ring1.color,
+        lwd = 0.01
+      ),
+      "line + dot" = list(
+        type = "o",
+        arear = FALSE,
+        col = bar_color,
+        lwd = 0.5
+      ),
+      "line + dot + filling" = list(
+        type = "o",
+        arear = TRUE,
+        col = bar_color,
+        lwd = 0.01
+      ),
+      "step line" = list(
+        type = "s",
+        arear = FALSE,
+        col = customize.ring1.color,
+        lwd = 0.5
+      ),
+      "step line + filling" = list(
+        type = "s",
+        arear = TRUE,
+        col = customize.ring1.color,
+        lwd = 0.01
+      ),
+      "vertical line" = list(
+        type = "h",
+        arear = FALSE,
+        col = bar_color,
+        lwd = 0.5
+      )
+    )
 
-    circlize::circos.track(factors =as.factor(customize.ring1$chr),
-                           x = customize.ring1$position,
-                           y = customize.ring1$value, ylim = ylim,
-                           track.height = height[2]/2,
-                           track.margin = c(0, circlize::convert_height(1, "mm")),
-                           bg.border = NA, bg.col = gc.background,
-                           panel.fun = function(x, y) {
-                             circlize::circos.lines(x, y, type = style$type,
-                                                    area = style$area,
-                                                    baseline = 0,
-                                                    pch = 1,
-                                                    cex = 0.2 * text.size,
-                                                    col = style$col,
-                                                    lwd = style$lwd)
-                             circlize::circos.segments(x0=0, x1=l, y0=0,
-                                                       y1=0, lwd=0.5,
-                                                       lty="16",
-                                                       col=darken(customize.ring1.color, 0.7))
-                           })
-
+    circlize::circos.track(
+      factors = as.factor(customize.ring1$chr),
+      x = customize.ring1$position,
+      y = customize.ring1$value,
+      ylim = ylim,
+      track.height = height[2] / 2,
+      track.margin = c(0, circlize::convert_height(1, "mm")),
+      bg.border = NA,
+      bg.col = gc.background,
+      panel.fun = function(x, y) {
+        circlize::circos.lines(
+          x,
+          y,
+          type = style$type,
+          area = style$area,
+          baseline = 0,
+          pch = 1,
+          cex = 0.2 * text.size,
+          col = style$col,
+          lwd = style$lwd
+        )
+        circlize::circos.segments(
+          x0 = 0,
+          x1 = l,
+          y0 = 0,
+          y1 = 0,
+          lwd = 0.5,
+          lty = "16",
+          col = darken(customize.ring1.color, 0.7)
+        )
+      }
+    )
   }
 
   # customized ring 2
@@ -814,39 +1070,88 @@ PlotPlastidGenome <- function(plot.tables, save = TRUE, file.type = "pdf",
       ylim[1] <- 0
       bar_color <- rep(customize.ring2.color, nrow(customize.ring2))
     }
-    if (max(customize.ring2$value) < 0){
+    if (max(customize.ring2$value) < 0) {
       ylim[2] <- 0
       bar_color <- rep(customize.ring2.color, nrow(customize.ring2))
     }
-    style <- switch(customize.ring2.type,
-                    "line" = list(type = "l", arear = FALSE, col = customize.ring2.color, lwd = 0.5),
-                    "line + filling" = list(type = "l", arear = TRUE, col = customize.ring2.color, lwd = 0.01),
-                    "line + dot" = list(type = "o", arear = FALSE, col = bar_color, lwd = 0.5),
-                    "line + dot + filling" = list(type = "o", arear = TRUE, col = bar_color, lwd = 0.01),
-                    "step line" = list(type = "s", arear = FALSE, col = customize.ring2.color, lwd = 0.5),
-                    "step line + filling" = list(type = "s", arear = TRUE, col = customize.ring2.color, lwd = 0.01),
-                    "vertical line" = list(type = "h", arear = FALSE, col = bar_color, lwd = 0.5))
+    style <- switch(
+      customize.ring2.type,
+      "line" = list(
+        type = "l",
+        arear = FALSE,
+        col = customize.ring2.color,
+        lwd = 0.5
+      ),
+      "line + filling" = list(
+        type = "l",
+        arear = TRUE,
+        col = customize.ring2.color,
+        lwd = 0.01
+      ),
+      "line + dot" = list(
+        type = "o",
+        arear = FALSE,
+        col = bar_color,
+        lwd = 0.5
+      ),
+      "line + dot + filling" = list(
+        type = "o",
+        arear = TRUE,
+        col = bar_color,
+        lwd = 0.01
+      ),
+      "step line" = list(
+        type = "s",
+        arear = FALSE,
+        col = customize.ring2.color,
+        lwd = 0.5
+      ),
+      "step line + filling" = list(
+        type = "s",
+        arear = TRUE,
+        col = customize.ring2.color,
+        lwd = 0.01
+      ),
+      "vertical line" = list(
+        type = "h",
+        arear = FALSE,
+        col = bar_color,
+        lwd = 0.5
+      )
+    )
 
-    circlize::circos.track(factors =as.factor(customize.ring2$chr),
-                           x = customize.ring2$position,
-                           y = customize.ring2$value, ylim = ylim,
-                           track.height = height[2]/2,
-                           track.margin = c(0, circlize::convert_height(1, "mm")),
-                           bg.border = NA, bg.col = gc.background,
-                           panel.fun = function(x, y) {
-                             circlize::circos.lines(x, y, type = style$type,
-                                                    area = style$area,
-                                                    baseline = 0,
-                                                    pch = 1,
-                                                    cex = 0.2 * text.size,
-                                                    col = style$col,
-                                                    lwd = style$lwd)
-                             circlize::circos.segments(x0=0, x1=l, y0=0,
-                                                       y1=0, lwd=0.5,
-                                                       lty="16",
-                                                       col=darken(customize.ring2.color, 0.7))
-                           })
-
+    circlize::circos.track(
+      factors = as.factor(customize.ring2$chr),
+      x = customize.ring2$position,
+      y = customize.ring2$value,
+      ylim = ylim,
+      track.height = height[2] / 2,
+      track.margin = c(0, circlize::convert_height(1, "mm")),
+      bg.border = NA,
+      bg.col = gc.background,
+      panel.fun = function(x, y) {
+        circlize::circos.lines(
+          x,
+          y,
+          type = style$type,
+          area = style$area,
+          baseline = 0,
+          pch = 1,
+          cex = 0.2 * text.size,
+          col = style$col,
+          lwd = style$lwd
+        )
+        circlize::circos.segments(
+          x0 = 0,
+          x1 = l,
+          y0 = 0,
+          y1 = 0,
+          lwd = 0.5,
+          lty = "16",
+          col = darken(customize.ring2.color, 0.7)
+        )
+      }
+    )
   }
 
   # customize.ring 3
@@ -856,247 +1161,400 @@ PlotPlastidGenome <- function(plot.tables, save = TRUE, file.type = "pdf",
     if (min(customize.ring3$value) > 0) {
       ylim[1] <- 0
     }
-    if (max(customize.ring3$value) < 0){
+    if (max(customize.ring3$value) < 0) {
       ylim[2] <- 0
     }
-    circlize::circos.track(factors =as.factor(customize.ring3$chr),
-                           track.margin = c(0, circlize::convert_height(1, "mm")),
-                           track.height = height[2]/2,
-                           ylim = ylim,
-                           bg.border = NA, bg.col = gc.background,
-                           panel.fun = function(x, y) {
-                             if (min(customize.ring3$value) < 0 &
-                                 max(customize.ring3$value) > 0) {
-                               df_large <- customize.ring3[which(customize.ring3$value > 0), ]
-                               df_less <- customize.ring3[which(customize.ring3$value < 0), ]
-                               circlize::circos.rect(xleft = df_large$start,
-                                                     xright = df_large$end,
-                                                     ybottom = 0,
-                                                     ytop = df_large$value,
-                                                     col = "orangered3",
-                                                     border = NA)
-                               circlize::circos.rect(xleft = df_less$start,
-                                                     xright = df_less$end,
-                                                     ybottom = df_less$value,
-                                                     ytop = 0,
-                                                     col = "steelblue",
-                                                     border = NA)
-                             } else if (min(customize.ring3$value) < 0) {
-                               circlize::circos.rect(xleft = customize.ring3$start,
-                                           xright = customize.ring3$end,
-                                           ybottom = customize.ring3$value,
-                                           ytop = 0,
-                                           col = customize.ring3.color,
-                                           border = NA)
-                             } else {
-                               circlize::circos.rect(xleft = customize.ring3$start,
-                                                    xright = customize.ring3$end,
-                                                    ybottom = 0,
-                                                    ytop = customize.ring3$value,
-                                                    col = customize.ring3.color,
-                                                    border = NA)
-                            }
-                           })
+    circlize::circos.track(
+      factors = as.factor(customize.ring3$chr),
+      track.margin = c(0, circlize::convert_height(1, "mm")),
+      track.height = height[2] / 2,
+      ylim = ylim,
+      bg.border = NA,
+      bg.col = gc.background,
+      panel.fun = function(x, y) {
+        if (
+          min(customize.ring3$value) < 0 &
+            max(customize.ring3$value) > 0
+        ) {
+          df_large <- customize.ring3[which(customize.ring3$value > 0), ]
+          df_less <- customize.ring3[which(customize.ring3$value < 0), ]
+          circlize::circos.rect(
+            xleft = df_large$start,
+            xright = df_large$end,
+            ybottom = 0,
+            ytop = df_large$value,
+            col = "orangered3",
+            border = NA
+          )
+          circlize::circos.rect(
+            xleft = df_less$start,
+            xright = df_less$end,
+            ybottom = df_less$value,
+            ytop = 0,
+            col = "steelblue",
+            border = NA
+          )
+        } else if (min(customize.ring3$value) < 0) {
+          circlize::circos.rect(
+            xleft = customize.ring3$start,
+            xright = customize.ring3$end,
+            ybottom = customize.ring3$value,
+            ytop = 0,
+            col = customize.ring3.color,
+            border = NA
+          )
+        } else {
+          circlize::circos.rect(
+            xleft = customize.ring3$start,
+            xright = customize.ring3$end,
+            ybottom = 0,
+            ytop = customize.ring3$value,
+            col = customize.ring3.color,
+            border = NA
+          )
+        }
+      }
+    )
   }
   # 6. Arrow outside gnome axis
-  circlize::circos.track(ylim = c(0, 1), track.height = 0.06, bg.border = NA,
-                         track.margin = c(0, circlize::convert_height(1, "mm")),
-                         panel.fun = function(x, y) {
-                           circlize::circos.arrow(x1 = l - l %/% 40,
-                                                  x2 = l,
-                                                  y = 0.85,
-                                                  arrow.position="start",
-                                                  col = MildColor(background),
-                                                  border = NA,
-                                                  arrow.head.length = circlize::convert_x(3, "mm"),
-                                                  width = 0.15)
-                           # circlize::circos.genomicAxis(h = "bottom")
-                         })
-
-
+  circlize::circos.track(
+    ylim = c(0, 1),
+    track.height = 0.06,
+    bg.border = NA,
+    track.margin = c(0, circlize::convert_height(1, "mm")),
+    panel.fun = function(x, y) {
+      circlize::circos.arrow(
+        x1 = l - l %/% 40,
+        x2 = l,
+        y = 0.85,
+        arrow.position = "start",
+        col = MildColor(background),
+        border = NA,
+        arrow.head.length = circlize::convert_x(3, "mm"),
+        width = 0.15
+      )
+      # circlize::circos.genomicAxis(h = "bottom")
+    }
+  )
 
   # 7. GC content
-  circlize::circos.track(factors =as.factor(gc_count$chr),
-                         x=gc_count$position,
-                         y = 1- gc_count$gc_count,
-                         ylim = c(0, 1),
-                         track.height = height[2],
-                         bg.border = NA, bg.col = gc.background,
-                         panel.fun = function(x, y) {
-                           circlize::circos.lines(x, y, type = "s", area = TRUE,
-                                                  baseline = "top",
-                                                  col = gc.color, lwd = 0.00001)
-                           circlize::circos.arrow(x1= 0,
-                                                  x2= l %/% 35,
-                                                  y= 0.9,
-                                                  col=MildColor(gc.color),
-                                                  border=NA,
-                                                  arrow.head.length=circlize::convert_x(3, "mm"),
-                                                  width=0.15 * 0.05 / height[2])
-                           circlize::circos.segments(x0=0, x1=l, y0=0.25,
-                                                     y1=0.25, lwd=0.5,
-                                                     lty="16", col=MildColor(gc.background))
-                           circlize::circos.segments(x0=0, x1=l, y0=0.5,
-                                                     y1=0.5, lwd=0.6,
-                                                     lty="11", col=MildColor(gc.background))
-                           circlize::circos.segments(x0=0, x1=l, y0=0.75,
-                                                     y1=0.75, lwd=0.5,
-                                                     lty="16", col=MildColor(gc.color))
-                           circlize::circos.genomicAxis(h = "top", labels.cex = 0.6 * text.size,labels.col = "blue")
-                         })
+  circlize::circos.track(
+    factors = as.factor(gc_count$chr),
+    x = gc_count$position,
+    y = 1 - gc_count$gc_count,
+    ylim = c(0, 1),
+    track.height = height[2],
+    bg.border = NA,
+    bg.col = gc.background,
+    panel.fun = function(x, y) {
+      circlize::circos.lines(
+        x,
+        y,
+        type = "s",
+        area = TRUE,
+        baseline = "top",
+        col = gc.color,
+        lwd = 0.00001
+      )
+      circlize::circos.arrow(
+        x1 = 0,
+        x2 = l %/% 35,
+        y = 0.9,
+        col = MildColor(gc.color),
+        border = NA,
+        arrow.head.length = circlize::convert_x(3, "mm"),
+        width = 0.15 * 0.05 / height[2]
+      )
+      circlize::circos.segments(
+        x0 = 0,
+        x1 = l,
+        y0 = 0.25,
+        y1 = 0.25,
+        lwd = 0.5,
+        lty = "16",
+        col = MildColor(gc.background)
+      )
+      circlize::circos.segments(
+        x0 = 0,
+        x1 = l,
+        y0 = 0.5,
+        y1 = 0.5,
+        lwd = 0.6,
+        lty = "11",
+        col = MildColor(gc.background)
+      )
+      circlize::circos.segments(
+        x0 = 0,
+        x1 = l,
+        y0 = 0.75,
+        y1 = 0.75,
+        lwd = 0.5,
+        lty = "16",
+        col = MildColor(gc.color)
+      )
+      circlize::circos.genomicAxis(
+        h = "top",
+        labels.cex = 0.6 * text.size,
+        labels.col = "blue"
+      )
+    }
+  )
   #circos.yaxis(at=c(0.25,0.5,0.75),labels.cex=0.25 * text.size,lwd=0,tick.length=0,
   #             labels.col="grey40",col="#FFFFFF")
 
   # 8. inner ring for IR, SSR, LSR
-  circlize::circos.genomicTrack(ir_table, bg.border = NA,
-                                ylim = c(0, 1),track.height = height[3],
-                                panel.fun = function(region, value, ...) {
-                                  if (ir.gc){
-                                    circlize::circos.rect(xleft = ir_table$start,
-                                                          ybottom = 0,#circlize::convert_y(0, "mm"),
-                                                          xright = ir_table$end,
-                                                          ytop = 1,#circlize::convert_y(3, "mm"),
-                                                          col = Transparent(ir_table$bg_col, 0.7),
-                                                          border = NA)
-                                    circlize::circos.rect(xleft = ir_table$start,
-                                                          ybottom =0,#circlize::convert_y(0, "mm"),
-                                                          xright = ir_table$end,
-                                                          ytop =  ir_table$gc_count,#circlize::convert_y(3, "mm"),
-                                                          col = ir_table$bg_col,
-                                                          border = NA)
-                                  } else {
-                                    circlize::circos.rect(xleft = ir_table$start,
-                                                          ybottom = 0,#circlize::convert_y(0, "mm"),
-                                                          xright = ir_table$end,
-                                                          ytop = 1,#circlize::convert_y(3, "mm"),
-                                                          col = ir_table$bg_col,
-                                                          border = NA)
-                                  }
-                                  if (!is.null(indel_table) & show.indel){
-                                    circlize::circos.rect(xleft = indel_table$position - 10,
-                                                          ybottom = 0,#circlize::convert_y(0, "mm"),
-                                                          xright = indel_table$position + 10,
-                                                          ytop = 1,#circlize::convert_y(3, "mm"),
-                                                          col = indel_table$bg_col,
-                                                          border = NA)
-                                    circlize::circos.points(x = indel_table$position,
-                                                            y = 0.05,
-                                                            col = indel_table$col,
-                                                            pch = 19,
-                                                            cex = 0.5 * text.size)
-                                    # circlize::circos.text(x = indel_table$position,
-                                    #                         y = 0.5,
-                                    #                         col = indel_table$col,
-                                    #                         labels = indel_table$string,
-                                    #                         cex = 0.2 * text.size)
-                                  }
+  circlize::circos.genomicTrack(
+    ir_table,
+    bg.border = NA,
+    ylim = c(0, 1),
+    track.height = height[3],
+    panel.fun = function(region, value, ...) {
+      if (ir.gc) {
+        circlize::circos.rect(
+          xleft = ir_table$start,
+          ybottom = 0, #circlize::convert_y(0, "mm"),
+          xright = ir_table$end,
+          ytop = 1, #circlize::convert_y(3, "mm"),
+          col = Transparent(ir_table$bg_col, 0.7),
+          border = NA
+        )
+        circlize::circos.rect(
+          xleft = ir_table$start,
+          ybottom = 0, #circlize::convert_y(0, "mm"),
+          xright = ir_table$end,
+          ytop = ir_table$gc_count, #circlize::convert_y(3, "mm"),
+          col = ir_table$bg_col,
+          border = NA
+        )
+      } else {
+        circlize::circos.rect(
+          xleft = ir_table$start,
+          ybottom = 0, #circlize::convert_y(0, "mm"),
+          xright = ir_table$end,
+          ytop = 1, #circlize::convert_y(3, "mm"),
+          col = ir_table$bg_col,
+          border = NA
+        )
+      }
+      if (!is.null(indel_table) & show.indel) {
+        circlize::circos.rect(
+          xleft = indel_table$position - 10,
+          ybottom = 0, #circlize::convert_y(0, "mm"),
+          xright = indel_table$position + 10,
+          ytop = 1, #circlize::convert_y(3, "mm"),
+          col = indel_table$bg_col,
+          border = NA
+        )
+        circlize::circos.points(
+          x = indel_table$position,
+          y = 0.05,
+          col = indel_table$col,
+          pch = 19,
+          cex = 0.5 * text.size
+        )
+        # circlize::circos.text(x = indel_table$position,
+        #                         y = 0.5,
+        #                         col = indel_table$col,
+        #                         labels = indel_table$string,
+        #                         cex = 0.2 * text.size)
+      }
 
-                                  circlize::circos.text(x = ir_table$center,
-                                                        y = ir_table$y, cex = 0.7 * text.size,
-                                                        labels = ir_table$text,
-                                                        facing = "bending.inside",
-                                                        col = ir_table$inf_col,
-                                                        niceFacing = TRUE)
-                                })
+      circlize::circos.text(
+        x = ir_table$center,
+        y = ir_table$y,
+        cex = 0.7 * text.size,
+        labels = ir_table$text,
+        facing = "bending.inside",
+        col = ir_table$inf_col,
+        niceFacing = TRUE
+      )
+    }
+  )
 
   # Specie's information inthe central
-  circlize::draw.sector(0, 360,
-                        rou1 = circlize::get.cell.meta.data("cell.bottom.radius",
-                                                            track.index = track_index['ir region']),
-                        rou2 = 0,
-                        col = info.background, border = NA)
+  circlize::draw.sector(
+    0,
+    360,
+    rou1 = circlize::get.cell.meta.data(
+      "cell.bottom.radius",
+      track.index = track_index['ir region']
+    ),
+    rou2 = 0,
+    col = info.background,
+    border = NA
+  )
 
-  if (organelle_type){
-    graphics::text(0,0.10, sp_name, font=4, cex = 0.8 * text.size, col = info.color)
-    graphics::text(0,0.05, "Plastid Genome", font=4, cex = 0.8 * text.size, col = info.color)
-  } else{
-    graphics::text(0,0.05, sp_name, font=4, cex = 0.8 * text.size, col = info.color)
+  if (organelle_type) {
+    graphics::text(
+      0,
+      0.10,
+      sp_name,
+      font = 4,
+      cex = 0.8 * text.size,
+      col = info.color
+    )
+    graphics::text(
+      0,
+      0.05,
+      "Plastid Genome",
+      font = 4,
+      cex = 0.8 * text.size,
+      col = info.color
+    )
+  } else {
+    graphics::text(
+      0,
+      0.05,
+      sp_name,
+      font = 4,
+      cex = 0.8 * text.size,
+      col = info.color
+    )
   }
 
-  ns <- c(paste(n_gene, "genes"), paste(n_rrn, "rRNAs"), paste(n_trn, "tRNAs"))[which(c(gene.no, rrn.no, trn.no))]
-  text <- c(paste(ns, collapse = "; "), paste(prettyNum(l, big.mark = ","), "bp", " "),
-            paste("GC:",round(gc_total, 2)*100,"%"))
+  ns <- c(
+    paste(n_gene, "genes"),
+    paste(n_rrn, "rRNAs"),
+    paste(n_trn, "tRNAs")
+  )[which(c(gene.no, rrn.no, trn.no))]
+  text <- c(
+    paste(ns, collapse = "; "),
+    paste(prettyNum(l, big.mark = ","), "bp", " "),
+    paste("GC:", round(gc_total, 2) * 100, "%")
+  )
   j <- 1
-  if (cu.bias){
+  if (cu.bias) {
     cex = 0.7 * text.size
   } else {
     cex = 0.8 * text.size
   }
   for (i in which(c((length(ns) != 0), genome.length, total.gc))) {
-    graphics::text(0,0.05 - 0.05 * j, text[i],
-                   font=4, cex = cex, col = info.color)
-    j <-  j + 1
+    graphics::text(
+      0,
+      0.05 - 0.05 * j,
+      text[i],
+      font = 4,
+      cex = cex,
+      col = info.color
+    )
+    j <- j + 1
   }
 
   # Highlight IR
 
-
-  if (shadow & (nrow(ir_table) >= 4)){
-
-    pos_s=circlize::circlize(ir_table$start[which(grepl("IR",
-                                                                    ir_table$name))],
-                             1, sector.index = "chr1", track.index = 1)
-    pos_e=circlize::circlize(ir_table$end[which(grepl("IR",
-                                                                  ir_table$name))],
-                             1, sector.index = "chr1", track.index = 1)
+  if (shadow & (nrow(ir_table) >= 4)) {
+    pos_s = circlize::circlize(
+      ir_table$start[which(grepl("IR", ir_table$name))],
+      1,
+      sector.index = "chr1",
+      track.index = 1
+    )
+    pos_e = circlize::circlize(
+      ir_table$end[which(grepl("IR", ir_table$name))],
+      1,
+      sector.index = "chr1",
+      track.index = 1
+    )
     for (i in 1:nrow(pos_s)) {
-      if ('gene' %in% names(track_index)){
-        circlize::draw.sector(pos_s[i, "theta"], pos_e[i, "theta"],
-                              #start.degree = 0, end.degree = 360 - 10,
-                              rou1 = circlize::get.cell.meta.data("cell.top.radius",
-                                                                  track.index = track_index['gene']),
-                              rou2 = circlize::get.cell.meta.data("cell.bottom.radius",
-                                                                  track.index = track_index['gc count']),
-                              col = shadow.color, border = NA)
+      if ('gene' %in% names(track_index)) {
+        circlize::draw.sector(
+          pos_s[i, "theta"],
+          pos_e[i, "theta"],
+          #start.degree = 0, end.degree = 360 - 10,
+          rou1 = circlize::get.cell.meta.data(
+            "cell.top.radius",
+            track.index = track_index['gene']
+          ),
+          rou2 = circlize::get.cell.meta.data(
+            "cell.bottom.radius",
+            track.index = track_index['gc count']
+          ),
+          col = shadow.color,
+          border = NA
+        )
       } else {
-        circlize::draw.sector(pos_s[i, "theta"], pos_e[i, "theta"],
-                              #start.degree = 0, end.degree = 360 - 10,
-                              rou1 = circlize::get.cell.meta.data("cell.top.radius",
-                                                                  track.index = track_index['arrow']),
-                              rou2 = circlize::get.cell.meta.data("cell.bottom.radius",
-                                                                  track.index = track_index['gc count']),
-                              col = shadow.color, border = NA)
+        circlize::draw.sector(
+          pos_s[i, "theta"],
+          pos_e[i, "theta"],
+          #start.degree = 0, end.degree = 360 - 10,
+          rou1 = circlize::get.cell.meta.data(
+            "cell.top.radius",
+            track.index = track_index['arrow']
+          ),
+          rou2 = circlize::get.cell.meta.data(
+            "cell.bottom.radius",
+            track.index = track_index['gc count']
+          ),
+          col = shadow.color,
+          border = NA
+        )
       }
-
     }
     if (!is.null(indel_table) & show.indel) {
-      pos_s=circlize::circlize(indel_table$position - 10,
-                               1, sector.index = "chr1", track.index = 1)
-      pos_e=circlize::circlize(indel_table$position + 10,
-                               1, sector.index = "chr1", track.index = 1)
+      pos_s = circlize::circlize(
+        indel_table$position - 10,
+        1,
+        sector.index = "chr1",
+        track.index = 1
+      )
+      pos_e = circlize::circlize(
+        indel_table$position + 10,
+        1,
+        sector.index = "chr1",
+        track.index = 1
+      )
       for (i in 1:nrow(pos_s)) {
-        if ('gene' %in% names(track_index)){
-          circlize::draw.sector(pos_s[i, "theta"], pos_e[i, "theta"],
-                                #start.degree = 0, end.degree = 360 - 10,
-                                rou1 = circlize::get.cell.meta.data("cell.top.radius",
-                                                                    track.index =  track_index['gene']),
-                                rou2 = circlize::get.cell.meta.data("cell.bottom.radius",
-                                                                    track.index = track_index['gc count']),
-                                col = Transparent("#FFFFFF", 0.5),
-                                border = NA)
+        if ('gene' %in% names(track_index)) {
+          circlize::draw.sector(
+            pos_s[i, "theta"],
+            pos_e[i, "theta"],
+            #start.degree = 0, end.degree = 360 - 10,
+            rou1 = circlize::get.cell.meta.data(
+              "cell.top.radius",
+              track.index = track_index['gene']
+            ),
+            rou2 = circlize::get.cell.meta.data(
+              "cell.bottom.radius",
+              track.index = track_index['gc count']
+            ),
+            col = Transparent("#FFFFFF", 0.5),
+            border = NA
+          )
         } else {
-          circlize::draw.sector(pos_s[i, "theta"], pos_e[i, "theta"],
-                                #start.degree = 0, end.degree = 360 - 10,
-                                rou1 = circlize::get.cell.meta.data("cell.top.radius",
-                                                                    track.index =  track_index['arrow']),
-                                rou2 = circlize::get.cell.meta.data("cell.bottom.radius",
-                                                                    track.index = track_index['gc count']),
-                                col = Transparent("#FFFFFF", 0.9),
-                                border = NA)
+          circlize::draw.sector(
+            pos_s[i, "theta"],
+            pos_e[i, "theta"],
+            #start.degree = 0, end.degree = 360 - 10,
+            rou1 = circlize::get.cell.meta.data(
+              "cell.top.radius",
+              track.index = track_index['arrow']
+            ),
+            rou2 = circlize::get.cell.meta.data(
+              "cell.bottom.radius",
+              track.index = track_index['gc count']
+            ),
+            col = Transparent("#FFFFFF", 0.9),
+            border = NA
+          )
         }
       }
     }
   }
   # Add legend
-  if (legend){
-    legend(x = -1.28, y = -0.56, legend = color_table$label, cex = 0.71 * text.size,
-           fill = color_table$col, box.col = rgb(255, 255, 255, alpha = 0, maxColorValue = 255))
+  if (legend) {
+    legend(
+      x = -1.28,
+      y = -0.56,
+      legend = color_table$label,
+      cex = 0.71 * text.size,
+      fill = color_table$col,
+      box.col = rgb(255, 255, 255, alpha = 0, maxColorValue = 255)
+    )
   }
 
-  if (save){
+  if (save) {
     grDevices::dev.off()
   }
-
 }
 
 #' Generate Mitochondrion Genome Plot
@@ -1221,34 +1679,66 @@ PlotPlastidGenome <- function(plot.tables, save = TRUE, file.type = "pdf",
 #' @importFrom magrittr %>%
 #' @import dplyr
 #' @export
-PlotMitGenome <- function(plot.tables, save = TRUE, file.type = "pdf",
-                          text.size = 1, height = c(0.1, 0.2, 0.07),
-                          file.name = NULL,
-                          gc.per.gene = TRUE, pseudo = TRUE, legend = TRUE,
-                          genome.length = TRUE, total.gc = TRUE,
-                          gene.no = TRUE, rrn.no = TRUE, trn.no = TRUE,
-                          organelle_type = TRUE,
-                          background = "grey90", gc.color = "grey30",
-                          gc.background = "grey70", info.background = "black",
-                          nad.color = "#2A6332", sdh.color = "#4C8805",
-                          cob.color = "#7F992C", cox.color = "#FEEE50",
-                          atp.color = "#9FBB3D", ccmF.color = "#4D9E3F",
-                          mmt.color = "#AE2D29", rps.color = "#D6AD7C",
-                          rpl.color = "#9C7A4B", mat.color = "#D9662D",
-                          orf.color = "#71B8A9", trn.color = "#172C7F",
-                          rrn.color = "#D1382A", other_gene.color = "#7D7D7D",
-                          show.genes = c("nad|nd","sdh","cob","cox|cytb","atp",
-                                         "ccmF","mtt","rps","rpl",
-                                         "mat","orf","trn","rrn", "OTHER"),
-                          cu.bias = TRUE, customize.ring1 = NULL,
-                          customize.ring1.color = "grey30",
-                          customize.ring1.type = "line",
-                          customize.ring2.color = "grey30",
-                          customize.ring2 = NULL,
-                          customize.ring2.type = "line",
-                          customize.ring3 = NULL,
-                          customize.ring3.color = "grey30"){
-
+PlotMitGenome <- function(
+  plot.tables,
+  save = TRUE,
+  file.type = "pdf",
+  text.size = 1,
+  height = c(0.1, 0.2, 0.07),
+  file.name = NULL,
+  gc.per.gene = TRUE,
+  pseudo = TRUE,
+  legend = TRUE,
+  genome.length = TRUE,
+  total.gc = TRUE,
+  gene.no = TRUE,
+  rrn.no = TRUE,
+  trn.no = TRUE,
+  organelle_type = TRUE,
+  background = "grey90",
+  gc.color = "grey30",
+  gc.background = "grey70",
+  info.background = "black",
+  nad.color = "#2A6332",
+  sdh.color = "#4C8805",
+  cob.color = "#7F992C",
+  cox.color = "#FEEE50",
+  atp.color = "#9FBB3D",
+  ccmF.color = "#4D9E3F",
+  mmt.color = "#AE2D29",
+  rps.color = "#D6AD7C",
+  rpl.color = "#9C7A4B",
+  mat.color = "#D9662D",
+  orf.color = "#71B8A9",
+  trn.color = "#172C7F",
+  rrn.color = "#D1382A",
+  other_gene.color = "#7D7D7D",
+  show.genes = c(
+    "nad|nd",
+    "sdh",
+    "cob",
+    "cox|cytb",
+    "atp",
+    "ccmF",
+    "mtt",
+    "rps",
+    "rpl",
+    "mat",
+    "orf",
+    "trn",
+    "rrn",
+    "OTHER"
+  ),
+  cu.bias = TRUE,
+  customize.ring1 = NULL,
+  customize.ring1.color = "grey30",
+  customize.ring1.type = "line",
+  customize.ring2.color = "grey30",
+  customize.ring2 = NULL,
+  customize.ring2.type = "line",
+  customize.ring3 = NULL,
+  customize.ring3.color = "grey30"
+) {
   # Unpack plot.table
   genome <- plot.tables$genome
   gc_count <- plot.tables$gc_count
@@ -1262,45 +1752,63 @@ PlotMitGenome <- function(plot.tables, save = TRUE, file.type = "pdf",
   # 1. Modify gene table
 
   # colouring
-  color_table <- mitGeneColor(nad.color = nad.color, sdh.color = sdh.color,
-                              cob.color = cob.color, cox.color = cox.color,
-                              atp.color = atp.color, ccmF.color = ccmF.color,
-                              mmt.color = mmt.color, rps.color = rps.color,
-                              rpl.color = mmt.color, mat.color = mat.color,
-                              orf.color = orf.color, trn.color = trn.color,
-                              rrn.color = rrn.color,
-                              other_gene.color = other_gene.color)
+  color_table <- mitGeneColor(
+    nad.color = nad.color,
+    sdh.color = sdh.color,
+    cob.color = cob.color,
+    cox.color = cox.color,
+    atp.color = atp.color,
+    ccmF.color = ccmF.color,
+    mmt.color = mmt.color,
+    rps.color = rps.color,
+    rpl.color = mmt.color,
+    mat.color = mat.color,
+    orf.color = orf.color,
+    trn.color = trn.color,
+    rrn.color = rrn.color,
+    other_gene.color = other_gene.color
+  )
 
-
-  gene_table <- dplyr::left_join(gene_table, color_table, by = c("class" = "acronym"))
+  gene_table <- dplyr::left_join(
+    gene_table,
+    color_table,
+    by = c("class" = "acronym")
+  )
 
   gene_table <- gene_table[which(gene_table$class %in% show.genes), ]
 
-  color_table <- color_table[which(color_table$acronym %in% unique(gene_table$class)), ]
+  color_table <- color_table[
+    which(color_table$acronym %in% unique(gene_table$class)),
+  ]
 
   # gene labels
   gene_table$gene_label <- gene_table$gene
-  if (cu.bias){
-    gene_table$gene_label <- apply(gene_table[, c("gene_label", "cu_bias")], 1,
-                                   function(x){
-                                     if (is.na(x[2])){
-                                       return(x[1])
-                                     } else {
-                                       return(paste0(x[1], " (",
-                                                     signif(as.numeric(x[2]), 2), ")"))
-                                     }
-                                   })
+  if (cu.bias) {
+    gene_table$gene_label <- apply(
+      gene_table[, c("gene_label", "cu_bias")],
+      1,
+      function(x) {
+        if (is.na(x[2])) {
+          return(x[1])
+        } else {
+          return(paste0(x[1], " (", signif(as.numeric(x[2]), 2), ")"))
+        }
+      }
+    )
   }
 
-  if (pseudo){
-    gene_table$gene_label <- apply(gene_table[, c("gene_label", "pseudo")], 1,
-                                   function(x){
-                                     if (x[2]){
-                                       return(paste0(x[1], " *"))
-                                     } else {
-                                       return(x[1])
-                                     }
-                                   })
+  if (pseudo) {
+    gene_table$gene_label <- apply(
+      gene_table[, c("gene_label", "pseudo")],
+      1,
+      function(x) {
+        if (x[2]) {
+          return(paste0(x[1], " *"))
+        } else {
+          return(x[1])
+        }
+      }
+    )
   }
   genome <- genome
   gene_table_r <- filter(gene_table, strand == "-") %>%
@@ -1321,268 +1829,352 @@ PlotMitGenome <- function(plot.tables, save = TRUE, file.type = "pdf",
 
   # 4. Generate plot
   # Initialize the plot device
-  if (save){
-    if (is.null(file.name)){
+  if (save) {
+    if (is.null(file.name)) {
       file <- sp_name
     } else {
       file <- file.name
     }
-    if (!file.type %in% c("jpeg", "bmp", "png", "tiff", "pdf")){
-      warning("Can not save plot in ", file.type, " format. Avaliable formats
-                are 'jpeg', 'bmp', 'png', 'tiff',and 'pdf'.")
-    } else if (file.type  == "pdf") {
-      grDevices::pdf(paste(file, file.type, sep="."), width=10.3, height=8.9)
+    if (!file.type %in% c("jpeg", "bmp", "png", "tiff", "pdf")) {
+      warning(
+        "Can not save plot in ",
+        file.type,
+        " format. Avaliable formats
+                are 'jpeg', 'bmp', 'png', 'tiff',and 'pdf'."
+      )
+    } else if (file.type == "pdf") {
+      grDevices::pdf(
+        paste(file, file.type, sep = "."),
+        width = 10.3,
+        height = 8.9
+      )
     } else {
-      do.call(file.type, args=list(filename=paste(file, file.type, sep="."),
-                                   width = 10.3, height = 8.9, units = "in",
-                                   res = 1000))
+      do.call(
+        file.type,
+        args = list(
+          filename = paste(file, file.type, sep = "."),
+          width = 10.3,
+          height = 8.9,
+          units = "in",
+          res = 1000
+        )
+      )
     }
   }
-
 
   # Initialize the layout
 
   # Track indexes
   track_index <- 1:7
-  names(track_index) <- c("gene out 1", "gene out 2", "gene", "gene inner 1",
-                          "gene inner 2", "arrow", "gc count")
+  names(track_index) <- c(
+    "gene out 1",
+    "gene out 2",
+    "gene",
+    "gene inner 1",
+    "gene inner 2",
+    "arrow",
+    "gc count"
+  )
 
-  if (!is.null(customize.ring1)){
-    track_index[c("arrow", "gc count")] <- track_index[c("arrow", "gc count")] + 1
+  if (!is.null(customize.ring1)) {
+    track_index[c("arrow", "gc count")] <- track_index[c("arrow", "gc count")] +
+      1
     track_index["customize 1"] <- track_index["gene inner 2"] + 1
   }
 
-  if (!is.null(customize.ring2)){
-    track_index[c("arrow", "gc count")] <- track_index[c("arrow", "gc count")] + 1
+  if (!is.null(customize.ring2)) {
+    track_index[c("arrow", "gc count")] <- track_index[c("arrow", "gc count")] +
+      1
     track_index["customize 2"] <- track_index["arrow"] - 1
   }
 
-  if (!is.null(customize.ring3)){
-    track_index[c("arrow", "gc count")] <- track_index[c("arrow", "gc count")] + 1
+  if (!is.null(customize.ring3)) {
+    track_index[c("arrow", "gc count")] <- track_index[c("arrow", "gc count")] +
+      1
     track_index["customize 3"] <- track_index["arrow"] - 1
   }
 
   # Track heights
-  n_customize_ring <- sum(c(!is.null(customize.ring1), !is.null(customize.ring2), !is.null(customize.ring3)))
-  if (n_customize_ring == 1){
-    height[2] <- height[2]/1.5
+  n_customize_ring <- sum(c(
+    !is.null(customize.ring1),
+    !is.null(customize.ring2),
+    !is.null(customize.ring3)
+  ))
+  if (n_customize_ring == 1) {
+    height[2] <- height[2] / 1.5
   } else if (n_customize_ring == 2) {
-    height[2] <- height[2]/2
+    height[2] <- height[2] / 2
     height[3] <- height[3] * 0.7
   } else if (n_customize_ring == 3) {
-    height[2] <- height[2]/2
+    height[2] <- height[2] / 2
     height[3] <- height[3] * 0.7
-    height[1] <- height[1] *0.7
+    height[1] <- height[1] * 0.7
   }
-
 
   circlize::circos.clear()
-  circlize::circos.par(start.degree = 0, gap.after = 0,
-                       track.margin = c(0, 0), cell.padding = c(0, 0, 0, 0))
-  circlize::circos.genomicInitialize(data=data.frame(chr="chr1", start=0, end=l,
-                                                     stringsAsFactors = FALSE),
-                                     plotType = NULL)
+  circlize::circos.par(
+    start.degree = 0,
+    gap.after = 0,
+    track.margin = c(0, 0),
+    cell.padding = c(0, 0, 0, 0)
+  )
+  circlize::circos.genomicInitialize(
+    data = data.frame(
+      chr = "chr1",
+      start = 0,
+      end = l,
+      stringsAsFactors = FALSE
+    ),
+    plotType = NULL
+  )
 
   # 1.2. gene label outside
-  if (nrow(gene_table_r) == 0 ) {
+  if (nrow(gene_table_r) == 0) {
     # Background
-    circlize::draw.sector(0, 360,
-                          rou1 = 1,
-                          rou2 = 0,
-                          col = background, border = NA)
+    circlize::draw.sector(
+      0,
+      360,
+      rou1 = 1,
+      rou2 = 0,
+      col = background,
+      border = NA
+    )
   } else {
-    circlize::circos.genomicLabels(gene_table_r, labels = gene_table_r$gene_label,
-                                   side = "outside",cex = 0.7 * text.size,
-                                   connection_height = circlize::convert_height(3, "mm"),
-                                   labels_height = max(graphics::strwidth(gene_table_r$gene_label,
-                                                                          cex = 0.7 * text.size,
-                                                                          font = graphics::par("font")))
+    circlize::circos.genomicLabels(
+      gene_table_r,
+      labels = gene_table_r$gene_label,
+      side = "outside",
+      cex = 0.7 * text.size,
+      connection_height = circlize::convert_height(3, "mm"),
+      labels_height = max(graphics::strwidth(
+        gene_table_r$gene_label,
+        cex = 0.7 * text.size,
+        font = graphics::par("font")
+      ))
     )
     # Background
-    circlize::draw.sector(0, 360,
-                          rou1 = circlize::get.cell.meta.data("cell.bottom.radius",
-                                                              track.index = 2),
-                          rou2 = 0,
-                          col = background, border = NA)
+    circlize::draw.sector(
+      0,
+      360,
+      rou1 = circlize::get.cell.meta.data(
+        "cell.bottom.radius",
+        track.index = 2
+      ),
+      rou2 = 0,
+      col = background,
+      border = NA
+    )
   }
-
-
 
   # 3. Gene rectangles
   if (nrow(gene_table_r) != 0 & nrow(gene_table_f) != 0) {
-    circlize::circos.genomicTrack(gene_table_f, factors = as.factor("chr1"),
-                                  ylim = c(-1, 1), bg.border = NA,
-                                  track.height = height[1], #circlize::convert_height(10, "mm"),
-                                  panel.fun = function(region, value, ...) {
+    circlize::circos.genomicTrack(
+      gene_table_f,
+      factors = as.factor("chr1"),
+      ylim = c(-1, 1),
+      bg.border = NA,
+      track.height = height[1], #circlize::convert_height(10, "mm"),
+      panel.fun = function(region, value, ...) {
+        if (gc.per.gene) {
+          # genes lay on forward chain
+          circlize::circos.genomicRect(
+            gene_table_f[, c("start", "end")],
+            value = gene_table_f$gene,
+            ybottom = -gene_table_f$gc_count,
+            ytop = 0,
+            col = gene_table_f$col,
+            border = NA
+          )
+          circlize::circos.genomicRect(
+            gene_table_f[, c("start", "end")],
+            value = gene_table_f$gene,
+            ybottom = -1,
+            ytop = 0,
+            lwd = 0.5,
+            col = Transparent(gene_table_f$col, 0.7),
+            border = NA
+          )
 
-                                    if(gc.per.gene){
-                                      # genes lay on forward chain
-                                      circlize::circos.genomicRect(
-                                        gene_table_f[, c("start", "end")],
-                                        value = gene_table_f$gene,
-                                        ybottom = - gene_table_f$gc_count,
-                                        ytop = 0,
-                                        col = gene_table_f$col,
-                                        border = NA)
-                                      circlize::circos.genomicRect(
-                                        gene_table_f[, c("start", "end")],
-                                        value = gene_table_f$gene,
-                                        ybottom = -1,
-                                        ytop = 0,
-                                        lwd = 0.5,
-                                        col = Transparent(gene_table_f$col, 0.7),
-                                        border = NA
-                                      )
+          # genes lay on reverse chain
+          circlize::circos.genomicRect(
+            gene_table_r[, c("start", "end")],
+            value = gene_table_r$gene,
+            ybottom = 0,
+            ytop = gene_table_r$gc_count,
+            col = gene_table_r$col,
+            border = NA
+          )
+          circlize::circos.genomicRect(
+            gene_table_r[, c("start", "end")],
+            value = gene_table_r$gene,
+            ybottom = 0,
+            ytop = 1,
+            lwd = 0.5,
+            col = Transparent(gene_table_r$col, 0.7),
+            border = NA
+          )
+        } else {
+          # genes lay on forward chain
+          circlize::circos.genomicRect(
+            gene_table_f[, c("start", "end")],
+            value = gene_table_f$gene,
+            ybottom = -1,
+            ytop = 0,
+            lwd = 0.5,
+            col = gene_table_f$col
+          )
 
-                                      # genes lay on reverse chain
-                                      circlize::circos.genomicRect(
-                                        gene_table_r[, c("start", "end")],
-                                        value = gene_table_r$gene,
-                                        ybottom = 0,
-                                        ytop = gene_table_r$gc_count,
-                                        col = gene_table_r$col,
-                                        border = NA)
-                                      circlize::circos.genomicRect(
-                                        gene_table_r[, c("start", "end")],
-                                        value = gene_table_r$gene,
-                                        ybottom = 0,
-                                        ytop = 1,
-                                        lwd = 0.5,
-                                        col = Transparent(gene_table_r$col, 0.7),
-                                        border = NA
-                                      )
-                                    } else {
-                                      # genes lay on forward chain
-                                      circlize::circos.genomicRect(
-                                        gene_table_f[, c("start", "end")],
-                                        value = gene_table_f$gene,
-                                        ybottom = -1,
-                                        ytop = 0,
-                                        lwd = 0.5,
-                                        col = gene_table_f$col
-                                      )
+          circlize::circos.genomicRect(
+            gene_table_r[, c("start", "end")],
+            value = gene_table_r$gene,
+            ybottom = 0,
+            ytop = 1,
+            lwd = 0.5,
+            col = gene_table_r$col
+          )
+        }
 
-                                      circlize::circos.genomicRect(
-                                        gene_table_r[, c("start", "end")],
-                                        value = gene_table_r$gene,
-                                        ybottom = 0,
-                                        ytop = 1,
-                                        lwd = 0.5,
-                                        col = gene_table_r$col
-                                      )
-                                    }
-
-                                    # the x axis
-                                    circlize::circos.rect(xleft = 0,
-                                                          ybottom = - 0.05,
-                                                          xright = l,
-                                                          ytop = 0.05,
-                                                          col = "black",
-                                                          border = NA)
-                                  })
-  } else if (nrow(gene_table_f) != 0){
-    circlize::circos.genomicTrack(gene_table_f, factors = as.factor("chr1"),
-                                  ylim = c(-1, 1), bg.border = NA,
-                                  track.height = height[1], #circlize::convert_height(10, "mm"),
-                                  panel.fun = function(region, value, ...) {
-
-                                    if (gc.per.gene){
-                                      # genes lay on forward chain
-                                      circlize::circos.genomicRect(
-                                        gene_table_f[, c("start", "end")],
-                                        value = gene_table_f$gene,
-                                        ybottom = - gene_table_f$gc_count,
-                                        ytop = 0,
-                                        col = gene_table_f$col,
-                                        border = NA)
-                                      circlize::circos.genomicRect(
-                                        gene_table_f[, c("start", "end")],
-                                        value = gene_table_f$gene,
-                                        ybottom = -1,
-                                        ytop = 0,
-                                        lwd = 0.5,
-                                        col = Transparent(gene_table_f$col, 0.7),
-                                        border = NA
-                                      )
-                                    } else {
-                                      # genes lay on forward chain
-                                      circlize::circos.genomicRect(
-                                        gene_table_f[, c("start", "end")],
-                                        value = gene_table_f$gene,
-                                        ybottom = -1,
-                                        ytop = 0,
-                                        lwd = 0.5,
-                                        col = gene_table_f$col
-                                      )
-                                    }
-                                    # the x axis
-                                    circlize::circos.rect(xleft = 0,
-                                                          ybottom = - 0.05,
-                                                          xright = l,
-                                                          ytop = 0.05,
-                                                          col = "black",
-                                                          border = NA)
-                                  })
+        # the x axis
+        circlize::circos.rect(
+          xleft = 0,
+          ybottom = -0.05,
+          xright = l,
+          ytop = 0.05,
+          col = "black",
+          border = NA
+        )
+      }
+    )
+  } else if (nrow(gene_table_f) != 0) {
+    circlize::circos.genomicTrack(
+      gene_table_f,
+      factors = as.factor("chr1"),
+      ylim = c(-1, 1),
+      bg.border = NA,
+      track.height = height[1], #circlize::convert_height(10, "mm"),
+      panel.fun = function(region, value, ...) {
+        if (gc.per.gene) {
+          # genes lay on forward chain
+          circlize::circos.genomicRect(
+            gene_table_f[, c("start", "end")],
+            value = gene_table_f$gene,
+            ybottom = -gene_table_f$gc_count,
+            ytop = 0,
+            col = gene_table_f$col,
+            border = NA
+          )
+          circlize::circos.genomicRect(
+            gene_table_f[, c("start", "end")],
+            value = gene_table_f$gene,
+            ybottom = -1,
+            ytop = 0,
+            lwd = 0.5,
+            col = Transparent(gene_table_f$col, 0.7),
+            border = NA
+          )
+        } else {
+          # genes lay on forward chain
+          circlize::circos.genomicRect(
+            gene_table_f[, c("start", "end")],
+            value = gene_table_f$gene,
+            ybottom = -1,
+            ytop = 0,
+            lwd = 0.5,
+            col = gene_table_f$col
+          )
+        }
+        # the x axis
+        circlize::circos.rect(
+          xleft = 0,
+          ybottom = -0.05,
+          xright = l,
+          ytop = 0.05,
+          col = "black",
+          border = NA
+        )
+      }
+    )
     track_index[3:length(track_index)] <- track_index[3:length(track_index)] - 2
-    track_index <- track_index[-which(names(track_index) %in% c("gene out 1", "gene out 2"))]
+    track_index <- track_index[
+      -which(names(track_index) %in% c("gene out 1", "gene out 2"))
+    ]
   } else if (nrow(gene_table_r) != 0) {
-    circlize::circos.genomicTrack(gene_table_r, factors = as.factor("chr1"),
-                                  ylim = c(-1, 1), bg.border = NA,
-                                  track.height = height[1], #circlize::convert_height(10, "mm"),
-                                  panel.fun = function(region, value, ...) {
+    circlize::circos.genomicTrack(
+      gene_table_r,
+      factors = as.factor("chr1"),
+      ylim = c(-1, 1),
+      bg.border = NA,
+      track.height = height[1], #circlize::convert_height(10, "mm"),
+      panel.fun = function(region, value, ...) {
+        if (gc.per.gene) {
+          # genes lay on reverse chain
+          circlize::circos.genomicRect(
+            gene_table_r[, c("start", "end")],
+            value = gene_table_r$gene,
+            ybottom = 0,
+            ytop = gene_table_r$gc_count,
+            col = gene_table_r$col,
+            border = NA
+          )
+          circlize::circos.genomicRect(
+            gene_table_r[, c("start", "end")],
+            value = gene_table_r$gene,
+            ybottom = 0,
+            ytop = 1,
+            lwd = 0.5,
+            col = Transparent(gene_table_r$col, 0.7),
+            border = NA
+          )
+        } else {
+          circlize::circos.genomicRect(
+            gene_table_r[, c("start", "end")],
+            value = gene_table_r$gene,
+            ybottom = 0,
+            ytop = 1,
+            lwd = 0.5,
+            col = gene_table_r$col
+          )
+        }
 
-                                    if(gc.per.gene){
-                                      # genes lay on reverse chain
-                                      circlize::circos.genomicRect(
-                                        gene_table_r[, c("start", "end")],
-                                        value = gene_table_r$gene,
-                                        ybottom = 0,
-                                        ytop = gene_table_r$gc_count,
-                                        col = gene_table_r$col,
-                                        border = NA)
-                                      circlize::circos.genomicRect(
-                                        gene_table_r[, c("start", "end")],
-                                        value = gene_table_r$gene,
-                                        ybottom = 0,
-                                        ytop = 1,
-                                        lwd = 0.5,
-                                        col = Transparent(gene_table_r$col, 0.7),
-                                        border = NA
-                                      )
-                                    } else {
-                                      circlize::circos.genomicRect(
-                                        gene_table_r[, c("start", "end")],
-                                        value = gene_table_r$gene,
-                                        ybottom = 0,
-                                        ytop = 1,
-                                        lwd = 0.5,
-                                        col = gene_table_r$col
-                                      )
-                                    }
-
-                                    # the x axis
-                                    circlize::circos.rect(xleft = 0,
-                                                          ybottom = - 0.05,
-                                                          xright = l,
-                                                          ytop = 0.05,
-                                                          col = "black",
-                                                          border = NA)
-                                  })
-    track_index[(which(names(track_index) == "gene inner 2") + 1):length(track_index)] <-
-      track_index[(which(names(track_index) == "gene inner 2") + 1):length(track_index)] - 2
-    track_index <- track_index[-which(names(track_index) %in% c("gene inner 1", "gene inner 2"))]
+        # the x axis
+        circlize::circos.rect(
+          xleft = 0,
+          ybottom = -0.05,
+          xright = l,
+          ytop = 0.05,
+          col = "black",
+          border = NA
+        )
+      }
+    )
+    track_index[
+      (which(names(track_index) == "gene inner 2") + 1):length(track_index)
+    ] <-
+      track_index[
+        (which(names(track_index) == "gene inner 2") + 1):length(track_index)
+      ] -
+      2
+    track_index <- track_index[
+      -which(names(track_index) %in% c("gene inner 1", "gene inner 2"))
+    ]
   } else {
-    track_index <- track_index[6:length(track_index)] -5
+    track_index <- track_index[6:length(track_index)] - 5
   }
 
   # 4.5. gene labels inside
-  if (nrow(gene_table_f) != 0){
-    circlize::circos.genomicLabels(gene_table_f, labels = gene_table_f$gene_label,
-                                   side = "inside", cex = 0.62 * text.size,
-                                   connection_height = circlize::convert_height(3, "mm"),
-                                   labels_height = max(graphics::strwidth(gene_table_f$gene_label,
-                                                                          cex = 0.5 * text.size,
-                                                                          font = graphics::par("font"))))
+  if (nrow(gene_table_f) != 0) {
+    circlize::circos.genomicLabels(
+      gene_table_f,
+      labels = gene_table_f$gene_label,
+      side = "inside",
+      cex = 0.62 * text.size,
+      connection_height = circlize::convert_height(3, "mm"),
+      labels_height = max(graphics::strwidth(
+        gene_table_f$gene_label,
+        cex = 0.5 * text.size,
+        font = graphics::par("font")
+      ))
+    )
   }
 
   # customized ring 1
@@ -1595,39 +2187,88 @@ PlotMitGenome <- function(plot.tables, save = TRUE, file.type = "pdf",
       ylim[1] <- 0
       bar_color <- rep(customize.ring1.color, nrow(customize.ring1))
     }
-    if (max(customize.ring1$value) < 0){
+    if (max(customize.ring1$value) < 0) {
       ylim[2] <- 0
       bar_color <- rep(customize.ring1.color, nrow(customize.ring1))
     }
-    style <- switch(customize.ring1.type,
-                    "line" = list(type = "l", arear = FALSE, col = customize.ring1.color, lwd = 0.5),
-                    "line + filling" = list(type = "l", arear = TRUE, col = customize.ring1.color, lwd = 0.01),
-                    "line + dot" = list(type = "o", arear = FALSE, col = bar_color, lwd = 0.5),
-                    "line + dot + filling" = list(type = "o", arear = TRUE, col = bar_color, lwd = 0.01),
-                    "step line" = list(type = "s", arear = FALSE, col = customize.ring1.color, lwd = 0.5),
-                    "step line + filling" = list(type = "s", arear = TRUE, col = customize.ring1.color, lwd = 0.01),
-                    "vertical line" = list(type = "h", arear = FALSE, col = bar_color, lwd = 0.5))
+    style <- switch(
+      customize.ring1.type,
+      "line" = list(
+        type = "l",
+        arear = FALSE,
+        col = customize.ring1.color,
+        lwd = 0.5
+      ),
+      "line + filling" = list(
+        type = "l",
+        arear = TRUE,
+        col = customize.ring1.color,
+        lwd = 0.01
+      ),
+      "line + dot" = list(
+        type = "o",
+        arear = FALSE,
+        col = bar_color,
+        lwd = 0.5
+      ),
+      "line + dot + filling" = list(
+        type = "o",
+        arear = TRUE,
+        col = bar_color,
+        lwd = 0.01
+      ),
+      "step line" = list(
+        type = "s",
+        arear = FALSE,
+        col = customize.ring1.color,
+        lwd = 0.5
+      ),
+      "step line + filling" = list(
+        type = "s",
+        arear = TRUE,
+        col = customize.ring1.color,
+        lwd = 0.01
+      ),
+      "vertical line" = list(
+        type = "h",
+        arear = FALSE,
+        col = bar_color,
+        lwd = 0.5
+      )
+    )
 
-    circlize::circos.track(factors =as.factor(customize.ring1$chr),
-                           x = customize.ring1$position,
-                           y = customize.ring1$value, ylim = ylim,
-                           track.height = height[2]/2,
-                           track.margin = c(0, circlize::convert_height(1, "mm")),
-                           bg.border = NA, bg.col = gc.background,
-                           panel.fun = function(x, y) {
-                             circlize::circos.lines(x, y, type = style$type,
-                                                    area = style$area,
-                                                    baseline = 0,
-                                                    pch = 1,
-                                                    cex = 0.2 * text.size,
-                                                    col = style$col,
-                                                    lwd = style$lwd)
-                             circlize::circos.segments(x0=0, x1=l, y0=0,
-                                                       y1=0, lwd=0.5,
-                                                       lty="16",
-                                                       col=darken(customize.ring1.color, 0.7))
-                           })
-
+    circlize::circos.track(
+      factors = as.factor(customize.ring1$chr),
+      x = customize.ring1$position,
+      y = customize.ring1$value,
+      ylim = ylim,
+      track.height = height[2] / 2,
+      track.margin = c(0, circlize::convert_height(1, "mm")),
+      bg.border = NA,
+      bg.col = gc.background,
+      panel.fun = function(x, y) {
+        circlize::circos.lines(
+          x,
+          y,
+          type = style$type,
+          area = style$area,
+          baseline = 0,
+          pch = 1,
+          cex = 0.2 * text.size,
+          col = style$col,
+          lwd = style$lwd
+        )
+        circlize::circos.segments(
+          x0 = 0,
+          x1 = l,
+          y0 = 0,
+          y1 = 0,
+          lwd = 0.5,
+          lty = "16",
+          col = darken(customize.ring1.color, 0.7)
+        )
+      }
+    )
   }
 
   # customized ring 2
@@ -1640,39 +2281,88 @@ PlotMitGenome <- function(plot.tables, save = TRUE, file.type = "pdf",
       ylim[1] <- 0
       bar_color <- rep(customize.ring2.color, nrow(customize.ring2))
     }
-    if (max(customize.ring2$value) < 0){
+    if (max(customize.ring2$value) < 0) {
       ylim[2] <- 0
       bar_color <- rep(customize.ring2.color, nrow(customize.ring2))
     }
-    style <- switch(customize.ring2.type,
-                    "line" = list(type = "l", arear = FALSE, col = customize.ring2.color, lwd = 0.5),
-                    "line + filling" = list(type = "l", arear = TRUE, col = customize.ring2.color, lwd = 0.01),
-                    "line + dot" = list(type = "o", arear = FALSE, col = bar_color, lwd = 0.5),
-                    "line + dot + filling" = list(type = "o", arear = TRUE, col = bar_color, lwd = 0.01),
-                    "step line" = list(type = "s", arear = FALSE, col = customize.ring2.color, lwd = 0.5),
-                    "step line + filling" = list(type = "s", arear = TRUE, col = customize.ring2.color, lwd = 0.01),
-                    "vertical line" = list(type = "h", arear = FALSE, col = bar_color, lwd = 0.5))
+    style <- switch(
+      customize.ring2.type,
+      "line" = list(
+        type = "l",
+        arear = FALSE,
+        col = customize.ring2.color,
+        lwd = 0.5
+      ),
+      "line + filling" = list(
+        type = "l",
+        arear = TRUE,
+        col = customize.ring2.color,
+        lwd = 0.01
+      ),
+      "line + dot" = list(
+        type = "o",
+        arear = FALSE,
+        col = bar_color,
+        lwd = 0.5
+      ),
+      "line + dot + filling" = list(
+        type = "o",
+        arear = TRUE,
+        col = bar_color,
+        lwd = 0.01
+      ),
+      "step line" = list(
+        type = "s",
+        arear = FALSE,
+        col = customize.ring2.color,
+        lwd = 0.5
+      ),
+      "step line + filling" = list(
+        type = "s",
+        arear = TRUE,
+        col = customize.ring2.color,
+        lwd = 0.01
+      ),
+      "vertical line" = list(
+        type = "h",
+        arear = FALSE,
+        col = bar_color,
+        lwd = 0.5
+      )
+    )
 
-    circlize::circos.track(factors =as.factor(customize.ring2$chr),
-                           x = customize.ring2$position,
-                           y = customize.ring2$value, ylim = ylim,
-                           track.height = height[2]/2,
-                           track.margin = c(0, circlize::convert_height(1, "mm")),
-                           bg.border = NA, bg.col = gc.background,
-                           panel.fun = function(x, y) {
-                             circlize::circos.lines(x, y, type = style$type,
-                                                    area = style$area,
-                                                    baseline = 0,
-                                                    pch = 1,
-                                                    cex = 0.2 * text.size,
-                                                    col = style$col,
-                                                    lwd = style$lwd)
-                             circlize::circos.segments(x0=0, x1=l, y0=0,
-                                                       y1=0, lwd=0.5,
-                                                       lty="16",
-                                                       col=darken(customize.ring2.color, 0.7))
-                           })
-
+    circlize::circos.track(
+      factors = as.factor(customize.ring2$chr),
+      x = customize.ring2$position,
+      y = customize.ring2$value,
+      ylim = ylim,
+      track.height = height[2] / 2,
+      track.margin = c(0, circlize::convert_height(1, "mm")),
+      bg.border = NA,
+      bg.col = gc.background,
+      panel.fun = function(x, y) {
+        circlize::circos.lines(
+          x,
+          y,
+          type = style$type,
+          area = style$area,
+          baseline = 0,
+          pch = 1,
+          cex = 0.2 * text.size,
+          col = style$col,
+          lwd = style$lwd
+        )
+        circlize::circos.segments(
+          x0 = 0,
+          x1 = l,
+          y0 = 0,
+          y1 = 0,
+          lwd = 0.5,
+          lty = "16",
+          col = darken(customize.ring2.color, 0.7)
+        )
+      }
+    )
   }
 
   # customize.ring 3
@@ -1682,137 +2372,228 @@ PlotMitGenome <- function(plot.tables, save = TRUE, file.type = "pdf",
     if (min(customize.ring3$value) > 0) {
       ylim[1] <- 0
     }
-    if (max(customize.ring3$value) < 0){
+    if (max(customize.ring3$value) < 0) {
       ylim[2] <- 0
     }
-    circlize::circos.track(factors =as.factor(customize.ring3$chr),
-                           track.margin = c(0, circlize::convert_height(1, "mm")),
-                           track.height = height[2]/2,
-                           ylim = ylim,
-                           bg.border = NA, bg.col = gc.background,
-                           panel.fun = function(x, y) {
-                             if (min(customize.ring3$value) < 0 &
-                                 max(customize.ring3$value) > 0) {
-                               df_large <- customize.ring3[which(customize.ring3$value > 0), ]
-                               df_less <- customize.ring3[which(customize.ring3$value < 0), ]
-                               circlize::circos.rect(xleft = df_large$start,
-                                                     xright = df_large$end,
-                                                     ybottom = 0,
-                                                     ytop = df_large$value,
-                                                     col = "orangered3",
-                                                     border = NA)
-                               circlize::circos.rect(xleft = df_less$start,
-                                                     xright = df_less$end,
-                                                     ybottom = df_less$value,
-                                                     ytop = 0,
-                                                     col = "steelblue",
-                                                     border = NA)
-                             } else if (min(customize.ring3$value) < 0) {
-                               circlize::circos.rect(xleft = customize.ring3$start,
-                                                     xright = customize.ring3$end,
-                                                     ybottom = customize.ring3$value,
-                                                     ytop = 0,
-                                                     col = customize.ring3.color,
-                                                     border = NA)
-                             } else {
-                               circlize::circos.rect(xleft = customize.ring3$start,
-                                                     xright = customize.ring3$end,
-                                                     ybottom = 0,
-                                                     ytop = customize.ring3$value,
-                                                     col = customize.ring3.color,
-                                                     border = NA)
-                             }
-                           })
+    circlize::circos.track(
+      factors = as.factor(customize.ring3$chr),
+      track.margin = c(0, circlize::convert_height(1, "mm")),
+      track.height = height[2] / 2,
+      ylim = ylim,
+      bg.border = NA,
+      bg.col = gc.background,
+      panel.fun = function(x, y) {
+        if (
+          min(customize.ring3$value) < 0 &
+            max(customize.ring3$value) > 0
+        ) {
+          df_large <- customize.ring3[which(customize.ring3$value > 0), ]
+          df_less <- customize.ring3[which(customize.ring3$value < 0), ]
+          circlize::circos.rect(
+            xleft = df_large$start,
+            xright = df_large$end,
+            ybottom = 0,
+            ytop = df_large$value,
+            col = "orangered3",
+            border = NA
+          )
+          circlize::circos.rect(
+            xleft = df_less$start,
+            xright = df_less$end,
+            ybottom = df_less$value,
+            ytop = 0,
+            col = "steelblue",
+            border = NA
+          )
+        } else if (min(customize.ring3$value) < 0) {
+          circlize::circos.rect(
+            xleft = customize.ring3$start,
+            xright = customize.ring3$end,
+            ybottom = customize.ring3$value,
+            ytop = 0,
+            col = customize.ring3.color,
+            border = NA
+          )
+        } else {
+          circlize::circos.rect(
+            xleft = customize.ring3$start,
+            xright = customize.ring3$end,
+            ybottom = 0,
+            ytop = customize.ring3$value,
+            col = customize.ring3.color,
+            border = NA
+          )
+        }
+      }
+    )
   }
   # 6. Arrow outside gnome axis
-  circlize::circos.track(ylim = c(0, 1), track.height = 0.06, bg.border = NA,
-                         track.margin = c(0, circlize::convert_height(1, "mm")),
-                         panel.fun = function(x, y) {
-                           circlize::circos.arrow(x1 = l - l %/% 40,
-                                                  x2 = l,
-                                                  y = 0.85,
-                                                  arrow.position="start",
-                                                  col = MildColor(background),
-                                                  border = NA,
-                                                  arrow.head.length = circlize::convert_x(3, "mm"),
-                                                  width = 0.15)
-                           # circlize::circos.genomicAxis(h = "bottom")
-                         })
-
-
+  circlize::circos.track(
+    ylim = c(0, 1),
+    track.height = 0.06,
+    bg.border = NA,
+    track.margin = c(0, circlize::convert_height(1, "mm")),
+    panel.fun = function(x, y) {
+      circlize::circos.arrow(
+        x1 = l - l %/% 40,
+        x2 = l,
+        y = 0.85,
+        arrow.position = "start",
+        col = MildColor(background),
+        border = NA,
+        arrow.head.length = circlize::convert_x(3, "mm"),
+        width = 0.15
+      )
+      # circlize::circos.genomicAxis(h = "bottom")
+    }
+  )
 
   # 7. GC content
-  circlize::circos.track(factors =as.factor(gc_count$chr),
-                         x=gc_count$position,
-                         y = 1- gc_count$gc_count,
-                         ylim = c(0, 1),
-                         track.height = height[2],
-                         bg.border = NA, bg.col = gc.background,
-                         panel.fun = function(x, y) {
-                           circlize::circos.lines(x, y, type = "s", area = TRUE,
-                                                  baseline = "top",
-                                                  col = gc.color, lwd = 0.00001)
-                           circlize::circos.arrow(x1= 0,
-                                                  x2= l %/% 35,
-                                                  y= 0.9,
-                                                  col=MildColor(gc.color),
-                                                  border=NA,
-                                                  arrow.head.length=circlize::convert_x(3, "mm"),
-                                                  width=0.15 * 0.05 / height[2])
-                           circlize::circos.segments(x0=0, x1=l, y0=0.25,
-                                                     y1=0.25, lwd=0.5,
-                                                     lty="16", col=MildColor(gc.background))
-                           circlize::circos.segments(x0=0, x1=l, y0=0.5,
-                                                     y1=0.5, lwd=0.6,
-                                                     lty="11", col=MildColor(gc.background))
-                           circlize::circos.segments(x0=0, x1=l, y0=0.75,
-                                                     y1=0.75, lwd=0.5,
-                                                     lty="16", col=MildColor(gc.color))
-                           circlize::circos.genomicAxis(h = "top", labels.cex = 0.6 * text.size)
-                         })
+  circlize::circos.track(
+    factors = as.factor(gc_count$chr),
+    x = gc_count$position,
+    y = 1 - gc_count$gc_count,
+    ylim = c(0, 1),
+    track.height = height[2],
+    bg.border = NA,
+    bg.col = gc.background,
+    panel.fun = function(x, y) {
+      circlize::circos.lines(
+        x,
+        y,
+        type = "s",
+        area = TRUE,
+        baseline = "top",
+        col = gc.color,
+        lwd = 0.00001
+      )
+      circlize::circos.arrow(
+        x1 = 0,
+        x2 = l %/% 35,
+        y = 0.9,
+        col = MildColor(gc.color),
+        border = NA,
+        arrow.head.length = circlize::convert_x(3, "mm"),
+        width = 0.15 * 0.05 / height[2]
+      )
+      circlize::circos.segments(
+        x0 = 0,
+        x1 = l,
+        y0 = 0.25,
+        y1 = 0.25,
+        lwd = 0.5,
+        lty = "16",
+        col = MildColor(gc.background)
+      )
+      circlize::circos.segments(
+        x0 = 0,
+        x1 = l,
+        y0 = 0.5,
+        y1 = 0.5,
+        lwd = 0.6,
+        lty = "11",
+        col = MildColor(gc.background)
+      )
+      circlize::circos.segments(
+        x0 = 0,
+        x1 = l,
+        y0 = 0.75,
+        y1 = 0.75,
+        lwd = 0.5,
+        lty = "16",
+        col = MildColor(gc.color)
+      )
+      circlize::circos.genomicAxis(h = "top", labels.cex = 0.6 * text.size)
+    }
+  )
   #circos.yaxis(at=c(0.25,0.5,0.75),labels.cex=0.25 * text.size,lwd=0,tick.length=0,
   #             labels.col="grey40",col="#FFFFFF")
 
   # Specie's information inthe central
-  circlize::draw.sector(0, 360,
-                        rou1 = circlize::get.cell.meta.data("cell.bottom.radius",
-                                                            track.index = track_index['gc count']),
-                        rou2 = 0,
-                        col = info.background, border = NA)
+  circlize::draw.sector(
+    0,
+    360,
+    rou1 = circlize::get.cell.meta.data(
+      "cell.bottom.radius",
+      track.index = track_index['gc count']
+    ),
+    rou2 = 0,
+    col = info.background,
+    border = NA
+  )
 
-  if (organelle_type){
-    graphics::text(0,0.10, sp_name, font=4, cex = 0.8 * text.size, col = info.color)
-    graphics::text(0,0.05, "Plastid Genome", font=4, cex = 0.8 * text.size, col = info.color)
-  } else{
-    graphics::text(0,0.05, sp_name, font=4, cex = 0.8 * text.size, col = info.color)
+  if (organelle_type) {
+    graphics::text(
+      0,
+      0.10,
+      sp_name,
+      font = 4,
+      cex = 0.8 * text.size,
+      col = info.color
+    )
+    graphics::text(
+      0,
+      0.05,
+      "Plastid Genome",
+      font = 4,
+      cex = 0.8 * text.size,
+      col = info.color
+    )
+  } else {
+    graphics::text(
+      0,
+      0.05,
+      sp_name,
+      font = 4,
+      cex = 0.8 * text.size,
+      col = info.color
+    )
   }
 
-  ns <- c(paste(n_gene, "genes"), paste(n_rrn, "rRNAs"), paste(n_trn, "tRNAs"))[which(c(gene.no, rrn.no, trn.no))]
-  text <- c(paste(ns, collapse = "; "), paste(prettyNum(l, big.mark = ","), "bp", " "),
-            paste("GC:",round(gc_total, 2)*100,"%"))
+  ns <- c(
+    paste(n_gene, "genes"),
+    paste(n_rrn, "rRNAs"),
+    paste(n_trn, "tRNAs")
+  )[which(c(gene.no, rrn.no, trn.no))]
+  text <- c(
+    paste(ns, collapse = "; "),
+    paste(prettyNum(l, big.mark = ","), "bp", " "),
+    paste("GC:", round(gc_total, 2) * 100, "%")
+  )
   j <- 1
-  if (cu.bias){
+  if (cu.bias) {
     cex = 0.7 * text.size
   } else {
     cex = 0.8 * text.size
   }
   for (i in which(c((length(ns) != 0), genome.length, total.gc))) {
-    graphics::text(0,0.05 - 0.05 * j, text[i],
-                   font=4, cex = cex, col = info.color)
-    j <-  j + 1
+    graphics::text(
+      0,
+      0.05 - 0.05 * j,
+      text[i],
+      font = 4,
+      cex = cex,
+      col = info.color
+    )
+    j <- j + 1
   }
 
   # Highlight IR
 
   # Add legend
-  if (legend){
-    legend(x = -1.27, y = -0.6, legend = color_table$label, cex = 0.6 * text.size,
-           fill = color_table$col, bg = rgb(255, 255, 255, alpha = 0, maxColorValue = 255),
-           box.col = rgb(255, 255, 255, alpha = 0, maxColorValue = 255))
+  if (legend) {
+    legend(
+      x = -1.27,
+      y = -0.6,
+      legend = color_table$label,
+      cex = 0.6 * text.size,
+      fill = color_table$col,
+      bg = rgb(255, 255, 255, alpha = 0, maxColorValue = 255),
+      box.col = rgb(255, 255, 255, alpha = 0, maxColorValue = 255)
+    )
   }
 
-  if (save){
+  if (save) {
     grDevices::dev.off()
   }
-
 }
