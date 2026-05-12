@@ -284,3 +284,262 @@ irDetect <- function(genome, seed.size = 1000) {
 
   return(list(ir_table = ir_table, indel_table = indel_table))
 }
+
+map_genome <- function(
+  genome,
+  seed_starts,
+  seed.size = 1000,
+  other_letter = FALSE
+) {
+  l <- Biostrings::nchar(genome)
+  genome_rc <- Biostrings::reverseComplement(genome)
+  # Breack the whole genome into small pieces (seeds) with size [seed.size]bp
+
+  seeds <- Biostrings::DNAStringSet(
+    genome,
+    start = seed_starts,
+    width = seed.size,
+  )
+  if (other_letter) {
+    names(seeds) <- 1:length(seeds)
+    seeds <- seeds[grepl("^[ATCG]", seeds)] # remove the reads start with letters rather than "ATCG"
+    seeds <- Biostrings::PDict(seeds, tb.start = 1, tb.end = 1)
+    m <- Biostrings::matchPDict(seeds, genome_rc, fixed = FALSE)
+    deleted_group <- setdiff(1:(length(seeds) + 1), names(m))
+    m <- as.data.frame(m)
+    for (i in 1:length(deleted_group)) {
+      m$group[which(m$group > deleted_group[i])] <- m$group[which(
+        m$group > deleted_group[i]
+      )] +
+        1
+    }
+  } else {
+    seeds <- Biostrings::PDict(seeds)
+    m <- Biostrings::matchPDict(seeds, genome_rc, max.mismatch = )
+    m <- as.data.frame(m)
+  }
+
+  # Mapping seeds to the reverse conplemented genome
+  m <- m[m$width > (seed.size * 0.9), ] # Keeping the seads with 90% matching to the genome
+
+  return(m)
+}
+
+detect_mismatch <- function(ira_seq, irb_seq, ira_s, irb_s, other_letter) {
+  if (other_letter) {
+    ir_map_a <- Biostrings::pairwiseAlignment(
+      pattern = ira_seq,
+      subject = Biostrings::reverseComplement(irb_seq),
+      fuzzyMatrix = Biostrings::nucleotideSubstitutionMatrix(),
+      substitutionMatrix = Biostrings::nucleotideSubstitutionMatrix()
+    )
+
+    ir_map_b <- Biostrings::pairwiseAlignment(
+      pattern = irb_seq,
+      subject = Biostrings::reverseComplement(ira_seq),
+      fuzzyMatrix = Biostrings::nucleotideSubstitutionMatrix(),
+      substitutionMatrix = Biostrings::nucleotideSubstitutionMatrix()
+    )
+  } else {
+    ir_map_a <- Biostrings::pairwiseAlignment(
+      pattern = ira_seq,
+      subject = Biostrings::reverseComplement(irb_seq)
+    )
+
+    ir_map_b <- Biostrings::pairwiseAlignment(
+      pattern = irb_seq,
+      subject = Biostrings::reverseComplement(ira_seq)
+    )
+  }
+
+  ## insert table for IRA and delete table for IRB
+
+  insert_table_a <- suppressWarnings(data.frame(Biostrings::insertion(
+    ir_map_a
+  )))
+
+  if (nrow(insert_table_a) != 0) {
+    insert_table_a$string <- as.character(Biostrings::DNAStringSet(
+      ir_map_a@pattern,
+      start = insert_table_a$start,
+      end = insert_table_a$end
+    ))
+    n_skip <- Biostrings::letterFrequency(
+      Biostrings::DNAStringSet(
+        ir_map_a@pattern,
+        start = rep(1, nrow(insert_table_a)),
+        end = insert_table_a$start
+      ),
+      letters = "-"
+    )
+    insert_table_a <- insert_table_a %>%
+      dplyr::mutate(start = start - n_skip + ira_s - 1) %>%
+      dplyr::mutate(end = end - n_skip + ira_s - 1)
+
+    insert_a <- NULL
+    for (i in 1:nrow(insert_table_a)) {
+      tmp <- data.frame(
+        mismatch_type = rep("insert", insert_table_a$width[i]),
+        position = seq(insert_table_a$start[i], insert_table_a$end[i]),
+        string = strsplit(insert_table_a$string[i], "")[[1]],
+        col = rep("green", insert_table_a$width[i]),
+        stringsAsFactors = FALSE
+      )
+      insert_a <- rbind.data.frame(insert_a, tmp)
+    }
+
+    delete_table_b <- suppressWarnings(data.frame(Biostrings::deletion(
+      ir_map_b
+    ))) %>%
+      dplyr::mutate(position = start + irb_s - 1) %>%
+      dplyr::mutate(string = rep("D", n())) %>%
+      dplyr::mutate(mismatch_type = rep("delete", n())) %>%
+      dplyr::mutate(col = rep("yellow", n())) %>%
+      dplyr::select(mismatch_type, position, string, col)
+  } else {
+    insert_a <- NULL
+    delete_table_b <- NULL
+  }
+
+  ## insert table for IRB and delete table for IRA
+  insert_table_b <- suppressWarnings(data.frame(Biostrings::insertion(
+    ir_map_b
+  )))
+
+  if (nrow(insert_table_b) != 0) {
+    insert_table_b$string <- as.character(Biostrings::DNAStringSet(
+      ir_map_b@pattern,
+      start = insert_table_b$start,
+      end = insert_table_b$end
+    ))
+    n_skip <- Biostrings::letterFrequency(
+      Biostrings::DNAStringSet(
+        ir_map_b@pattern,
+        start = rep(1, nrow(insert_table_b)),
+        end = insert_table_b$start
+      ),
+      letters = "-"
+    )
+    insert_table_b <- insert_table_b %>%
+      dplyr::mutate(start = start - n_skip + irb_s - 1) %>%
+      dplyr::mutate(end = end - n_skip + irb_s - 1)
+
+    insert_b <- NULL
+    for (i in 1:nrow(insert_table_b)) {
+      tmp <- data.frame(
+        mismatch_type = rep("insert", insert_table_b$width[i]),
+        position = seq(insert_table_b$start[i], insert_table_b$end[i]),
+        string = strsplit(insert_table_b$string[i], "")[[1]],
+        col = rep("green", insert_table_b$width[i]),
+        stringsAsFactors = FALSE
+      )
+      insert_b <- rbind.data.frame(insert_b, tmp)
+    }
+
+    delete_table_a <- suppressWarnings(data.frame(Biostrings::deletion(
+      ir_map_a
+    ))) %>%
+      dplyr::mutate(position = start + ira_s - 1) %>%
+      dplyr::mutate(string = rep("D", n())) %>%
+      dplyr::mutate(mismatch_type = rep("delete", n())) %>%
+      dplyr::mutate(col = rep("yellow", n())) %>%
+      dplyr::select(mismatch_type, position, string, col)
+  } else {
+    insert_b <- NULL
+    delete_table_a <- NULL
+  }
+
+  ## replace table
+  replace_table_a <- Biostrings::mismatchTable(ir_map_a)
+
+  if (nrow(replace_table_a) != 0) {
+    tmp <- NULL
+    for (i in 1:nrow(replace_table_a)) {
+      if (
+        Biostrings::nucleotideSubstitutionMatrix()[
+          as.character(replace_table_a$PatternSubstring[i]),
+          as.character(replace_table_a$SubjectSubstring[i])
+        ] !=
+          0
+      ) {
+        tmp <- c(tmp, i)
+      }
+    }
+
+    if (!is.null(tmp)) {
+      replace_table_a <- replace_table_a[!(1:nrow(replace_table_a) %in% tmp), ]
+    }
+  }
+
+  if (nrow(replace_table_a) != 0) {
+    n_skip <- as.vector(Biostrings::letterFrequency(
+      Biostrings::DNAStringSet(
+        ir_map_a@pattern,
+        start = rep(1, nrow(replace_table_a)),
+        end = replace_table_a$PatternStart
+      ),
+      letters = "-"
+    ))
+    replace_table_ira <- data.frame(
+      position = replace_table_a$PatternStart - n_skip + ira_s - 1,
+      string = replace_table_a$PatternSubstring,
+      mismatch_type = rep("replace", nrow(replace_table_a)),
+      col = rep("red", nrow(replace_table_a)),
+      stringsAsFactors = FALSE
+    )
+
+    replace_table_b <- Biostrings::mismatchTable(ir_map_b)
+
+    tmp <- NULL
+    for (i in 1:nrow(replace_table_b)) {
+      if (
+        Biostrings::nucleotideSubstitutionMatrix()[
+          as.character(replace_table_b$PatternSubstring[i]),
+          as.character(replace_table_b$SubjectSubstring[i])
+        ] !=
+          0
+      ) {
+        tmp <- c(tmp, i)
+      }
+    }
+
+    if (!is.null(tmp)) {
+      replace_table_b <- replace_table_b[!(1:nrow(replace_table_b) %in% tmp), ]
+    }
+
+    n_skip <- as.vector(Biostrings::letterFrequency(
+      Biostrings::DNAStringSet(
+        ir_map_b@pattern,
+        start = rep(1, nrow(replace_table_b)),
+        end = replace_table_b$PatternStart
+      ),
+      letters = "-"
+    ))
+
+    replace_table_irb <- data.frame(
+      position = replace_table_b$PatternStart - n_skip + irb_s - 1,
+      string = replace_table_b$PatternSubstring,
+      mismatch_type = rep("replace", nrow(replace_table_b)),
+      col = rep("red", nrow(replace_table_b)),
+      stringsAsFactors = FALSE
+    )
+  } else {
+    replace_table_ira <- NULL
+    replace_table_irb <- NULL
+  }
+  indel_table <- Reduce(
+    rbind.data.frame,
+    list(
+      insert_a,
+      insert_b,
+      delete_table_a,
+      delete_table_b,
+      replace_table_ira,
+      replace_table_irb
+    )
+  )
+  if (nrow(indel_table) == 0) {
+    indel_table <- NULL
+  }
+  return(indel_table)
+}
